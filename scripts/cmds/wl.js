@@ -1,188 +1,252 @@
 const fs = require("fs-extra");
+const { config } = global.GoatBot;
 
 module.exports = {
 	config: {
-		name: "whitelist",
-		aliases: ["wl", "whitelistmode"],
-		version: "1.0",
-		author: "Neoaz 🐊",
-		countDown: 5,
+		name: "wl",
+		aliases: ["whitelist"],
+		version: "4.0",
+		author: "xalman",
+		countDown: 3,
 		role: 2,
-		description: {
-			en: "manage the user and thread whitelist and turn whitelist-mode on/off"
+		longDescription: {
+			en: "Manage user & thread whitelist in one command"
 		},
 		category: "owner",
 		guide: {
-			en: "   {pn} [on | off]: turn user whitelist mode on/off"
-				+ "\n   {pn} thread [on | off]: turn thread whitelist mode on/off"
-				+ "\n   {pn} add <uid | @tag | reply>: add user(s) to the whitelist (defaults to the sender)"
-				+ "\n   {pn} remove <uid | @tag | reply>: remove user(s) from the whitelist"
-				+ "\n   {pn} addthread [threadID]: add a thread to the whitelist (defaults to this chat)"
-				+ "\n   {pn} removethread [threadID]: remove a thread from the whitelist"
-				+ "\n   {pn} list: show the user whitelist"
-				+ "\n   {pn} listthread: show the thread whitelist"
+			en:
+				"👤 USER WHITELIST\n" +
+				"   {pn} user on | off → enable/disable user whitelist mode\n" +
+				"   {pn} user add <uid | @tag | reply> → add user(s)\n" +
+				"   {pn} user remove <uid | @tag | reply> → remove user(s)\n" +
+				"   {pn} user list → list whitelisted users\n\n" +
+				"👥 THREAD WHITELIST\n" +
+				"   {pn} thread on | off → enable/disable thread whitelist mode\n" +
+				"   {pn} thread add [tid] → add this/specific thread\n" +
+				"   {pn} thread remove [tid] → remove this/specific thread\n" +
+				"   {pn} thread list → list whitelisted threads\n\n" +
+				"📊 STATUS\n" +
+				"   {pn} status → show both whitelist statuses"
 		}
 	},
 
 	langs: {
 		en: {
-			turnedOn: "✅ Turned on user whitelist mode",
-			turnedOff: "✅ Turned off user whitelist mode",
-			threadTurnedOn: "✅ Turned on thread whitelist mode",
-			threadTurnedOff: "✅ Turned off thread whitelist mode",
-			added: "✅ Added %1 to the whitelist:\n%2",
-			alreadyAdded: "\n⚠️ %1 already in the whitelist:\n%2",
-			removed: "✅ Removed %1 from the whitelist:\n%2",
-			notInList: "\n⚠️ %1 not in the whitelist:\n%2",
-			missingIdAdd: "⚠️ Please enter a uid, tag a user, or reply to a message to add",
-			missingIdRemove: "⚠️ Please enter a uid, tag a user, or reply to a message to remove",
-			listUser: "📑 User whitelist (%1):\n%2",
-			listThread: "📑 Thread whitelist (%1):\n%2",
-			empty: "  (empty)",
-			on: "on",
-			off: "off"
+			userAdded: "✅ | Added whiteList role for %1 users:\n%2",
+			userAlready: "\n⚠ | %1 users already have whiteList role:\n%2",
+			userMissingAdd: "⚠ | Please enter ID, tag or reply to a user to add in whiteListIds",
+			userRemoved: "✅ | Removed whiteList role of %1 users:\n%2",
+			userNotIn: "⚠ | %1 users don't have whiteListIds role:\n%2",
+			userMissingRemove: "⚠ | Please enter ID, tag or reply to a user to remove whiteListIds",
+			userList: "👑 | List of whiteListIds:\n%1",
+			userListEmpty: "👑 | No users in whiteListIds",
+			userOn: "✅ | User whitelist mode: ON",
+			userOff: "✅ | User whitelist mode: OFF",
+
+			threadOn: "✅ 𝗪𝗛𝗜𝗧𝗘𝗟𝗜𝗦𝗧-𝗧𝗛𝗥𝗘𝗔𝗗 𝗠𝗢𝗗𝗘: 𝗢𝗡\n━━━━━━━━━━━━━━━━━━\n🔒 Only bot admins can use the bot in groups NOT on the whitelist.\n📋 Whitelisted groups : %1",
+			threadOff: "🚫 𝗪𝗛𝗜𝗧𝗘𝗟𝗜𝗦𝗧-𝗧𝗛𝗥𝗘𝗔𝗗 𝗠𝗢𝗗𝗘: 𝗢𝗙𝗙\n━━━━━━━━━━━━━━━━━━\n🌍 The bot now works normally in every group.",
+			threadAddedThis: "✅ 𝗔𝗗𝗗𝗘𝗗\n━━━━━━━━━━━━━━━━━━\n📌 This group (%1) has been added to the whitelist.",
+			threadAddedId: "✅ 𝗔𝗗𝗗𝗘𝗗\n━━━━━━━━━━━━━━━━━━\n📌 Group %1 has been added to the whitelist.",
+			threadAlready: "ℹ️ Group %1 is already on the whitelist.",
+			threadRemovedThis: "✅ 𝗥𝗘𝗠𝗢𝗩𝗘𝗗\n━━━━━━━━━━━━━━━━━━\n📌 This group (%1) has been removed from the whitelist.",
+			threadRemovedId: "✅ 𝗥𝗘𝗠𝗢𝗩𝗘𝗗\n━━━━━━━━━━━━━━━━━━\n📌 Group %1 has been removed from the whitelist.",
+			threadNotIn: "ℹ️ Group %1 wasn't on the whitelist.",
+			threadList: "📋 𝗪𝗛𝗜𝗧𝗘𝗟𝗜𝗦𝗧𝗘𝗗 𝗚𝗥𝗢𝗨𝗣𝗦\n━━━━━━━━━━━━━━━━━━\n%1",
+			threadListEmpty: "📋 𝗪𝗛𝗜𝗧𝗘𝗟𝗜𝗦𝗧𝗘𝗗 𝗚𝗥𝗢𝗨𝗣𝗦\n━━━━━━━━━━━━━━━━━━\nNo groups have been whitelisted yet.",
+
+			status: "🔐 𝗪𝗛𝗜𝗧𝗘𝗟𝗜𝗦𝗧 𝗦𝗧𝗔𝗧𝗨𝗦\n━━━━━━━━━━━━━━━━━━\n👤 User mode   : %1\n👥 Thread mode : %2\n• Whitelisted users   : %3\n• Whitelisted threads : %4",
+			syntaxError: "⚠ | Invalid usage! Type {pn} for guide."
 		}
 	},
 
-	onStart: async function ({ args, message, event, usersData, threadsData, getLang }) {
-		const config = global.GoatBot.config;
-		const userMode = config.whiteListMode || (config.whiteListMode = { enable: false, whiteListIds: [] });
-		const threadMode = config.whiteListModeThread || (config.whiteListModeThread = { enable: false, whiteListThreadIds: [] });
-		if (!Array.isArray(userMode.whiteListIds))
-			userMode.whiteListIds = [];
-		if (!Array.isArray(threadMode.whiteListThreadIds))
-			threadMode.whiteListThreadIds = [];
+	onStart: async function ({ message, args, usersData, event, getLang, prefix, commandName, threadsData }) {
+		const { client } = global;
 
-		const action = (args[0] || "").toLowerCase();
-		const command = action;
-		const rest = args.slice(1);
+		if (!config.whiteListMode)
+			config.whiteListMode = { enable: false, whiteListIds: [] };
+		if (!Array.isArray(config.whiteListMode.whiteListIds))
+			config.whiteListMode.whiteListIds = [];
 
-		const save = () => fs.writeFileSync(global.client.dirConfig, JSON.stringify(config, null, 2));
+		if (!config.whiteListModeThread)
+			config.whiteListModeThread = { enable: false, whiteListThreadIds: [] };
+		if (!Array.isArray(config.whiteListModeThread.whiteListThreadIds))
+			config.whiteListModeThread.whiteListThreadIds = [];
 
-		const collectUids = () => {
-			if (event.mentions && Object.keys(event.mentions).length > 0)
-				return Object.keys(event.mentions);
-			if (event.messageReply)
-				return [event.messageReply.senderID];
-			return rest.filter(arg => /^\d+$/.test(arg));
+		const saveConfig = () => fs.writeFileSync(client.dirConfig, JSON.stringify(config, null, 2));
+
+		const type = (args[0] || "").toLowerCase();
+		const sub = (args[1] || "").toLowerCase();
+
+		const extractUIDs = (startIndex) => {
+			let uids = [];
+			const mentions = event.mentions || {};
+			if (Object.keys(mentions).length > 0)
+				uids.push(...Object.keys(mentions));
+			if (event.messageReply && event.messageReply.senderID)
+				uids.push(String(event.messageReply.senderID));
+			const numericArgs = args.slice(startIndex).filter(a => /^\d+$/.test(a));
+			uids.push(...numericArgs);
+			return [...new Set(uids.filter(Boolean))];
 		};
 
-		if (action === "thread") {
-			const sub = (rest[0] || "").toLowerCase();
-			if (sub !== "on" && sub !== "off")
-				return message.SyntaxError();
-			threadMode.enable = sub === "on";
-			save();
-			return message.reply(getLang(threadMode.enable ? "threadTurnedOn" : "threadTurnedOff"));
+		if (type === "user" || type === "u") {
+			switch (sub) {
+				case "on": {
+					config.whiteListMode.enable = true;
+					saveConfig();
+					return message.reply(getLang("userOn"));
+				}
+				case "off": {
+					config.whiteListMode.enable = false;
+					saveConfig();
+					return message.reply(getLang("userOff"));
+				}
+				case "add":
+				case "-a": {
+					const uids = extractUIDs(2);
+					if (uids.length === 0)
+						return message.reply(getLang("userMissingAdd"));
+
+					const notAdminIds = [];
+					const adminIds = [];
+					for (const uid of uids) {
+						if (config.whiteListMode.whiteListIds.includes(uid))
+							adminIds.push(uid);
+						else
+							notAdminIds.push(uid);
+					}
+					config.whiteListMode.whiteListIds.push(...notAdminIds);
+
+					const getNames = await Promise.all(
+						uids.map(uid => usersData.getName(uid).then(name => ({ uid, name })))
+					);
+					saveConfig();
+
+					return message.reply(
+						(notAdminIds.length > 0
+							? getLang("userAdded", notAdminIds.length, getNames.filter(n => notAdminIds.includes(n.uid)).map(({ uid, name }) => `• ${name} (${uid})`).join("\n"))
+							: "") +
+						(adminIds.length > 0
+							? getLang("userAlready", adminIds.length, adminIds.map(uid => `• ${uid}`).join("\n"))
+							: "")
+					);
+				}
+				case "remove":
+				case "-r": {
+					const uids = extractUIDs(2);
+					if (uids.length === 0)
+						return message.reply(getLang("userMissingRemove"));
+
+					const notAdminIds = [];
+					const adminIds = [];
+					for (const uid of uids) {
+						if (config.whiteListMode.whiteListIds.includes(uid))
+							adminIds.push(uid);
+						else
+							notAdminIds.push(uid);
+					}
+					for (const uid of adminIds)
+						config.whiteListMode.whiteListIds.splice(config.whiteListMode.whiteListIds.indexOf(uid), 1);
+
+					const getNames = await Promise.all(
+						adminIds.map(uid => usersData.getName(uid).then(name => ({ uid, name })))
+					);
+					saveConfig();
+
+					return message.reply(
+						(adminIds.length > 0
+							? getLang("userRemoved", adminIds.length, getNames.map(({ uid, name }) => `• ${name} (${uid})`).join("\n"))
+							: "") +
+						(notAdminIds.length > 0
+							? getLang("userNotIn", notAdminIds.length, notAdminIds.map(uid => `• ${uid}`).join("\n"))
+							: "")
+					);
+				}
+				case "list":
+				case "-l": {
+					if (config.whiteListMode.whiteListIds.length === 0)
+						return message.reply(getLang("userListEmpty"));
+					const getNames = await Promise.all(
+						config.whiteListMode.whiteListIds.map(uid =>
+							usersData.getName(uid).then(name => ({ uid, name }))
+						)
+					);
+					return message.reply(getLang("userList", getNames.map(({ uid, name }) => `• ${name} (${uid})`).join("\n")));
+				}
+				default:
+					return message.reply(getLang("syntaxError", prefix, commandName));
+			}
 		}
 
-		switch (command) {
-			case "":
-			case "status":
-				return message.reply(
-					getLang("listUser", userMode.enable ? getLang("on") : getLang("off"),
-						userMode.whiteListIds.length ? userMode.whiteListIds.map(uid => `• ${uid}`).join("\n") : getLang("empty"))
-					+ "\n" + getLang("listThread", threadMode.enable ? getLang("on") : getLang("off"),
-						threadMode.whiteListThreadIds.length ? threadMode.whiteListThreadIds.map(tid => `• ${tid}`).join("\n") : getLang("empty"))
-				);
-			case "on":
-				userMode.enable = true;
-				save();
-				return message.reply(getLang("turnedOn"));
-			case "off":
-				userMode.enable = false;
-				save();
-				return message.reply(getLang("turnedOff"));
-			case "thread": {
-				return message.SyntaxError();
-			}
-			case "add": {
-				const uids = collectUids();
-				if (uids.length === 0)
-					return message.reply(getLang("missingIdAdd"));
-				const added = [];
-				const existed = [];
-				for (const uid of uids) {
-					if (userMode.whiteListIds.includes(uid))
-						existed.push(uid);
-					else {
-						userMode.whiteListIds.push(uid);
-						added.push(uid);
-					}
+		if (type === "thread" || type === "t") {
+			const wltConfig = config.whiteListModeThread;
+			const getThreadLabel = async (tid) => {
+				try {
+					const t = await threadsData.get(tid);
+					return t?.threadName ? `${t.threadName} (${tid})` : tid;
+				} catch {
+					return tid;
 				}
-				save();
-				const nameOf = async uid => {
-					const name = await usersData.getName(uid).catch(() => uid);
-					return `• ${name} (${uid})`;
-				};
-				return message.reply(
-					(added.length ? getLang("added", added.length, (await Promise.all(added.map(nameOf))).join("\n")) : "")
-					+ (existed.length ? getLang("alreadyAdded", existed.length, (await Promise.all(existed.map(nameOf))).join("\n")) : "")
-				);
-			}
-			case "remove":
-			case "rm":
-			case "del": {
-				const uids = collectUids();
-				if (uids.length === 0)
-					return message.reply(getLang("missingIdRemove"));
-				const removed = [];
-				const missing = [];
-				for (const uid of uids) {
-					if (userMode.whiteListIds.includes(uid)) {
-						userMode.whiteListIds.splice(userMode.whiteListIds.indexOf(uid), 1);
-						removed.push(uid);
-					}
-					else
-						missing.push(uid);
+			};
+
+			const tidArg = args[2];
+
+			switch (sub) {
+				case "on": {
+					wltConfig.enable = true;
+					saveConfig();
+					return message.reply(getLang("threadOn", wltConfig.whiteListThreadIds.length));
 				}
-				save();
-				return message.reply(
-					(removed.length ? getLang("removed", removed.length, removed.map(uid => `• ${uid}`).join("\n")) : "")
-					+ (missing.length ? getLang("notInList", missing.length, missing.map(uid => `• ${uid}`).join("\n")) : "")
-				);
+				case "off": {
+					wltConfig.enable = false;
+					saveConfig();
+					return message.reply(getLang("threadOff"));
+				}
+				case "add": {
+					const targetID = tidArg && /^\d+$/.test(tidArg) ? tidArg : event.threadID;
+					const usingCurrent = targetID === event.threadID && !tidArg;
+
+					if (wltConfig.whiteListThreadIds.includes(targetID))
+						return message.reply(getLang("threadAlready", targetID));
+
+					wltConfig.whiteListThreadIds.push(targetID);
+					saveConfig();
+					return message.reply(usingCurrent ? getLang("threadAddedThis", targetID) : getLang("threadAddedId", targetID));
+				}
+				case "remove": {
+					const targetID = tidArg && /^\d+$/.test(tidArg) ? tidArg : event.threadID;
+					const usingCurrent = targetID === event.threadID && !tidArg;
+
+					if (!wltConfig.whiteListThreadIds.includes(targetID))
+						return message.reply(getLang("threadNotIn", targetID));
+
+					wltConfig.whiteListThreadIds = wltConfig.whiteListThreadIds.filter(id => id !== targetID);
+					saveConfig();
+					return message.reply(usingCurrent ? getLang("threadRemovedThis", targetID) : getLang("threadRemovedId", targetID));
+				}
+				case "list": {
+					if (wltConfig.whiteListThreadIds.length === 0)
+						return message.reply(getLang("threadListEmpty"));
+					const labels = await Promise.all(wltConfig.whiteListThreadIds.map(getThreadLabel));
+					return message.reply(getLang("threadList", labels.map(l => `• ${l}`).join("\n")));
+				}
+				default:
+					return message.reply(getLang("syntaxError", prefix, commandName));
 			}
-			case "addthread":
-			case "addt": {
-				const tid = rest.find(arg => /^\d+$/.test(arg)) || event.threadID;
-				if (threadMode.whiteListThreadIds.includes(tid))
-					return message.reply(getLang("alreadyAdded", 1, `• ${tid}`));
-				threadMode.whiteListThreadIds.push(tid);
-				save();
-				return message.reply(getLang("added", 1, `• ${tid}`));
-			}
-			case "removethread":
-			case "removet":
-			case "delthread": {
-				const tid = rest.find(arg => /^\d+$/.test(arg)) || event.threadID;
-				if (!threadMode.whiteListThreadIds.includes(tid))
-					return message.reply(getLang("notInList", 1, `• ${tid}`));
-				threadMode.whiteListThreadIds.splice(threadMode.whiteListThreadIds.indexOf(tid), 1);
-				save();
-				return message.reply(getLang("removed", 1, `• ${tid}`));
-			}
-			case "list":
-			case "-l": {
-				if (userMode.whiteListIds.length === 0)
-					return message.reply(getLang("listUser", userMode.enable ? getLang("on") : getLang("off"), getLang("empty")));
-				const names = await Promise.all(userMode.whiteListIds.map(async uid => {
-					const name = await usersData.getName(uid).catch(() => uid);
-					return `• ${name} (${uid})`;
-				}));
-				return message.reply(getLang("listUser", userMode.enable ? getLang("on") : getLang("off"), names.join("\n")));
-			}
-			case "listthread":
-			case "listt": {
-				if (threadMode.whiteListThreadIds.length === 0)
-					return message.reply(getLang("listThread", threadMode.enable ? getLang("on") : getLang("off"), getLang("empty")));
-				const names = await Promise.all(threadMode.whiteListThreadIds.map(async tid => {
-					const name = await threadsData.get(tid, "threadName").catch(() => null);
-					return `• ${name || "Unnamed"} (${tid})`;
-				}));
-				return message.reply(getLang("listThread", threadMode.enable ? getLang("on") : getLang("off"), names.join("\n")));
-			}
-			default:
-				return message.SyntaxError();
 		}
+
+		if (type === "status" || type === "s" || type === "") {
+			return message.reply(
+				getLang(
+					"status",
+					config.whiteListMode.enable ? "ON ✅" : "OFF 🚫",
+					config.whiteListModeThread.enable ? "ON ✅" : "OFF 🚫",
+					config.whiteListMode.whiteListIds.length,
+					config.whiteListModeThread.whiteListThreadIds.length
+				)
+			);
+		}
+
+		return message.reply(getLang("syntaxError", prefix, commandName));
 	}
 };
