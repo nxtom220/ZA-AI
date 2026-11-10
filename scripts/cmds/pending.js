@@ -70,7 +70,6 @@ module.exports = {
 ┃ ✅ 𝚂𝚝𝚊𝚝𝚞𝚜: Active
 ┃ 📞 𝚆𝚑𝚊𝚝𝚜𝙰𝚙𝚙: 01410577478
 ┃ ✉️ 𝙴𝚖𝚊𝚒𝚕: wwwakash.khan530@gmail.com
-┃ 🧵 𝚃𝚎𝚕𝚎𝚐𝚛𝚊𝚖: T.ME/AKASH-120
 ┃ 💡 𝚃𝚒𝚙: Type #help to see all commands!
 ╚════════════════════╝`, targetThread);
 
