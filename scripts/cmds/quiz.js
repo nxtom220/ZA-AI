@@ -1,70 +1,9 @@
-const mongoose = require("mongoose");
-
-// ==================== DATABASE MODELS ====================
-const bankUserSchema = new mongoose.Schema({
-  userID: { type: String, required: true, unique: true },
-  bankBalance: { type: Number, default: 0 }
-});
-const BankUser = mongoose.models.DiabloBankUser || mongoose.model("DiabloBankUser", bankUserSchema);
-
-const quizStatsSchema = new mongoose.Schema({
-  userID: { type: String, required: true, unique: true },
-  wins: { type: Number, default: 0 },
-  total: { type: Number, default: 0 }
-});
-const QuizStats = mongoose.models.DiabloQuizStats || mongoose.model("DiabloQuizStats", quizStatsSchema);
-
-// ==================== HELPERS ====================
-async function getBankUser(uid) {
-  let user = await BankUser.findOne({ userID: uid });
-  if (!user) user = await BankUser.create({ userID: uid, bankBalance: 0 });
-  return user;
-}
-
-async function getCombinedBalance(usersData, uid) {
-  const wallet = (await usersData.get(uid))?.money || 0;
-  const bankUser = await getBankUser(uid);
-  return wallet + (bankUser.bankBalance || 0);
-}
-
-async function deductPenalty(usersData, uid, amount) {
-  const user = await usersData.get(uid) || { money: 0 };
-  let wallet = user.money || 0;
-  const bankUser = await getBankUser(uid);
-  let bank = bankUser.bankBalance || 0;
-
-  if (wallet >= amount) {
-    wallet -= amount;
-  } else {
-    const remaining = amount - wallet;
-    wallet = 0;
-    bank = Math.max(0, bank - remaining);
-  }
-
-  await usersData.set(uid, { money: wallet });
-  bankUser.bankBalance = bank;
-  await bankUser.save();
-}
-
-async function creditReward(usersData, uid, amount) {
-  const user = await usersData.get(uid) || { money: 0 };
-  user.money = (user.money || 0) + amount;
-  await usersData.set(uid, { money: user.money });
-  return await getCombinedBalance(usersData, uid);
-}
-
-async function getQuizStats(uid) {
-  let stats = await QuizStats.findOne({ userID: uid });
-  if (!stats) stats = await QuizStats.create({ userID: uid });
-  return stats;
-}
-
 module.exports = {
   config: {
     name: "quiz",
     aliases: ["qz"],
-    version: "3.1.0",
-    author: "DI-ABLO JISOO",
+    version: "3.2.0",
+    author: "DI-ABLO JISOO (Modified)",
     countDown: 5,
     role: 0,
     shortDescription: "Answer funny quizzes to win or lose money!",
@@ -87,80 +26,83 @@ module.exports = {
 
     // ৭০টি আজাইরা ও রোস্ট কুইজ
     const quizData = [
-      { q: "১+১=৩ হয় কখন?", options: ["ক্যালকুলেটর নষ্ট হলে", "ভুল করলে", "স্বপ্নে", "কখনোই না"], correctIndex: 1 },
-      { q: "মাথায় চুল নেই, কিন্তু সবসময় চিরুনি নিয়ে ঘোরে— কে?", options: ["পাগল", "চিরুনি বিক্রেতা", "হেয়ার স্টাইলিস্ট", "টাক মাথা মানুষ"], correctIndex: 1 },
-      { q: "রাতে ঘুমানোর আগে কোন জিনিসটা সবচেয়ে বেশি পরিশ্রম করে?", options: ["মাথার ব্রেইন", "মোবাইল চার্জার", "বালিশ", "মশারির দড়ি"], correctIndex: 1 },
-      { q: "ছেলেদের সবচেয়ে বড় শত্রু কে?", options: ["পরীক্ষার খাতা", "প্রেমিকার 'Seen'", "মা-বাবা", "বাসার কারেন্ট বিল"], correctIndex: 1 },
-      { q: "কোন প্রাণী কখনো পানি খায় না?", options: ["উট", "ক্যাঙ্গারু র‍্যাট", "জিরাফ", "সিংহ"], correctIndex: 1 },
-      { q: "কোন জিনিস যত টানো হয়, তত ছোট হয়ে যায়?", options: ["রাবার", "সিগারেট", "দড়ি", "চুইংগাম"], correctIndex: 1 },
-      { q: "প্রেমিকা রাগ করলে সাধারণত কী করে?", options: ["কেঁদে ফেলে", "সোশ্যাল মিডিয়ায় স্টোরি দেয়", "চুপ করে থাকে", "মেরে ফেলে"], correctIndex: 1 },
-      { q: "পৃথিবীর সবচেয়ে দ্রুতগামী জিনিস কোনটি?", options: ["আলো", "ভাইয়ের পকেট থেকে টাকা খরচ হওয়া", "প্লেন", "গফুরের গাধা"], correctIndex: 1 },
-      { q: "ছেলেদের লাইফে সবচেয়ে বড় ট্র্যাজেডি কোনটা?", options: ["চুল পড়া", "ফোন চার্জ না থাকা", "ক্রাশের মেসেজে 'Seen' দিয়ে চুপ থাকা", "পকেটে টাকা না থাকা"], correctIndex: 2 },
-      { q: "মেয়েদের সবচেয়ে বড় ডায়েট প্রোগ্রাম কোনটি?", options: ["জিমে যাওয়া", "সকালে না খেয়ে থাকা", "কাল থেকে ডায়েট শুরু করব বলা", "সালাদ খাওয়া"], correctIndex: 2 },
-      { q: "বিয়ে করার পর ছেলেদের কী হারিয়ে যায়?", options: ["চাকরি", "বন্ধু", "ফ্রিডম", "মোবাইল"], correctIndex: 2 },
-      { q: "কোন প্রাণী তার নিজের লেজ দেখে ভয় পায়?", options: ["বিড়াল", "কুকুর", "বানর", "খরগোশ"], correctIndex: 0 },
-      { q: "কোন সবজি খেলে মানুষের মাথা গরম হয়?", options: ["আলু", "পেঁয়াজ", "লাউ", "কুমড়া"], correctIndex: 1 },
-      { q: "স্কুলে সবচেয়ে বেশি ভয় দেখায় কোন জিনিস?", options: ["শিক্ষক", "রেজাল্ট শিট", "হোমওয়ার্ক", "প্রিন্সিপালের রুম"], correctIndex: 1 },
+      { q: "১+১=৩ হয় কখন?", options: ["ক্যালকুলেটর নষ্ট হলে", "ভুল করলে", "স্বপ্নে", "কখনোই না"], correctIndex: 1 },
+      { q: "মাথায় চুল নেই, কিন্তু সবসময় চিরুনি নিয়ে ঘোরে— কে?", options: ["পাগল", "চিরুনি বিক্রেতা", "হেয়ার স্টাইলিস্ট", "টাক মাথা মানুষ"], correctIndex: 1 },
+      { q: "রাতে ঘুমানোর আগে কোন জিনিসটা সবচেয়ে বেশি পরিশ্রম করে?", options: ["মাথার ব্রেইন", "মোবাইল চার্জার", "বালিশ", "মশারির দড়ি"], correctIndex: 1 },
+      { q: "ছেলেদের সবচেয়ে বড় শত্রু কে?", options: ["পরীক্ষার খাতা", "প্রেমিকার 'Seen'", "মা-বাবা", "বাসার কারেন্ট বিল"], correctIndex: 1 },
+      { q: "কোন প্রাণী কখনো পানি খায় না?", options: ["উট", "ক্যাঙ্গারু র‍্যাট", "জিরাফ", "সিংহ"], correctIndex: 1 },
+      { q: "কোন জিনিস যত টানো হয়, তত ছোট হয়ে যায়?", options: ["রাবার", "সিগারেট", "দড়ি", "চুইংগাম"], correctIndex: 1 },
+      { q: "প্রেমিকা রাগ করলে সাধারণত কী করে?", options: ["কেঁদে ফেলে", "সোশ্যাল মিডিয়ায় স্টোরি দেয়", "চুপ করে থাকে", "মেরে ফেলে"], correctIndex: 1 },
+      { q: "পৃথিবীর সবচেয়ে দ্রুতগামী জিনিস কোনটি?", options: ["আলো", "ভাইয়ের পকেট থেকে টাকা খরচ হওয়া", "প্লেন", "গফুরের গাধা"], correctIndex: 1 },
+      { q: "ছেলেদের লাইফে সবচেয়ে বড় ট্র্যাজেডি কোনটা?", options: ["চুল পড়া", "ফোন চার্জ না থাকা", "ক্রাশের মেসেজে 'Seen' দিয়ে চুপ থাকা", "পকেটে টাকা না থাকা"], correctIndex: 2 },
+      { q: "মেয়েদের সবচেয়ে বড় ডায়েট প্রোগ্রাম কোনটি?", options: ["জিমে যাওয়া", "সকালে না খেয়ে থাকা", "কাল থেকে ডায়েট শুরু করব বলা", "সালাদ খাওয়া"], correctIndex: 2 },
+      { q: "বিয়ে করার পর ছেলেদের কী হারিয়ে যায়?", options: ["চাকরি", "বন্ধু", "ফ্রিডম", "মোবাইল"], correctIndex: 2 },
+      { q: "কোন প্রাণী তার নিজের লেজ দেখে ভয় পায়?", options: ["বিড়াল", "কুকুর", "বানর", "খরগোশ"], correctIndex: 0 },
+      { q: "কোন সবজি খেলে মানুষের মাথা গরম হয়?", options: ["আলু", "পেঁয়াজ", "লাউ", "কুমড়া"], correctIndex: 1 },
+      { q: "স্কুলে সবচেয়ে বেশি ভয় দেখায় কোন জিনিস?", options: ["শিক্ষক", "রেজাল্ট শিট", "হোমওয়ার্ক", "প্রিন্সিপালের রুম"], correctIndex: 1 },
       { q: "এমন কী জিনিস যা তোমার, কিন্তু অন্যরা বেশি ব্যবহার করে?", options: ["তোমার ফোন", "তোমার নাম", "তোমার টাকা", "তোমার জামা"], correctIndex: 1 },
-      { q: "কোন জিনিস পকেটে থাকলে কেউ দিতে চায় না?", options: ["টাকা", "ফোন", "বিল", "চাবি"], correctIndex: 2 },
+      { q: "কোন জিনিস পকেটে থাকলে কেউ দিতে চায় না?", options: ["টাকা", "ফোন", "বিল", "চাবি"], correctIndex: 2 },
       { q: "মুরগি আগে আসে না ডিম আগে আসে?", options: ["মুরগি", "ডিম", "দুটোই না", "কষা মুরগি"], correctIndex: 3 },
-      { q: "লাইফে সাকসেস হতে চাইলে সবচেয়ে আগে কী ছাড়তে হবে?", options: ["ঘুম", "সিন (Seen)", "ফেসবুক", "সবগুলো"], correctIndex: 3 },
-      { q: "ছেলেরা মেসেজ রিপ্লাই দিতে দেরি করে কেন?", options: ["ব্যস্ত থাকে", "ভুলে যায়", "গেম খেলে", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন খাবারটা খেলে সবাই খুশি হয়?", options: ["বিরিয়ানি", "সালাদ", "সবজি", "ওটস"], correctIndex: 0 },
-      { q: "কোন রঙের গাড়ি সবচেয়ে দ্রুত যায়?", options: ["লাল", "কালো", "সাদা", "হলুদ"], correctIndex: 0 },
-      { q: "কোন প্রাণীর পিঠে হাঁটা যায় না?", options: ["হাতি", "উট", "সিংহ", "সাপ"], correctIndex: 3 },
-      { q: "কোন মাসে মানুষ সবচেয়ে কম কাজ করে?", options: ["জানুয়ারি", "ডিসেম্বর", "রমজান", "কোনো মাসেই না"], correctIndex: 2 },
-      { q: "মোবাইল চার্জার হারিয়ে গেলে কার রাগ বেশি হয়?", options: ["মায়ের", "বাবার", "নিজের", "বোনের"], correctIndex: 2 },
-      { q: "কোন জিনিস দেখতে পাওয়া যায় না, কিন্তু অনুভব করা যায়?", options: ["বাতাস", "ভালোবাসা", "ব্যথা", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন ফলটি খেতে মিষ্টি কিন্তু মনে bitter?", options: ["কামরাঙ্গা", "লেবু", "আমড়া", "অলিভ"], correctIndex: 2 },
-      { q: "মানুষ কেন সকালে অ্যালার্ম বন্ধ করে আবার ঘুমায়?", options: ["ক্লান্তি", "৫ মিনিটের লোভ", "অলসতা", "সবগুলো"], correctIndex: 3 },
-      { q: "পৃথিবীতে সবচেয়ে বেশি পাওয়া যায় কী?", options: ["পানি", "বালি", "ভুয়া বন্ধু", "গাছ"], correctIndex: 2 },
-      { q: "কোন প্রাণী মানুষের মতো হাসে?", options: ["বানর", "হায়েনা", "কুকুর", "ডলফিন"], correctIndex: 1 },
-      { q: "কোন জিনিসের দাম সবচেয়ে বেশি?", options: ["সোনা", "হীরা", "সম্মান", "তেল"], correctIndex: 2 },
-      { q: "কোন সময়টা সবচেয়ে দ্রুত কেটে যায়?", options: ["অফিসে", "ঘুমে", "ছুটির দিনে", "পরীক্ষায়"], correctIndex: 2 },
-      { q: "কোন জিনিস খেলে পেট ভরে না, কিন্তু খাওয়া না খেলে মারা যায়?", options: ["ভাত", "পানি", "ধোঁকা", "ভালোবাসা"], correctIndex: 2 },
-      { q: "কোন প্রাণী পিছনে হাঁটতে পারে?", options: ["মানুষ", "কাঁকড়া", "ঘোড়া", "বিড়াল"], correctIndex: 1 },
-      { q: "কোন রঙের জামা পরলে মানুষের ওজন কম দেখায়?", options: ["সাদা", "লাল", "কালো", "হলুদ"], correctIndex: 2 },
-      { q: "ছেলেরা কেন বন্ধুদের সাথে বেশি কথা বলে?", options: ["ভালো লাগে", "গসিপ করতে", "প্রেমিকার চেয়ে কম ঝামেলা", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন খাবারটি গরম খেলে সবচেয়ে বেশি আরাম লাগে?", options: ["সিঙ্গারা", "চা", "খিচুড়ি", "বিরিয়ানি"], correctIndex: 1 },
-      { q: "কোন প্রাণীর ইমিউনিটি সবচেয়ে বেশি?", options: ["মানুষ", "তেলাপোকা", "ইঁদুর", "ব্যাঙ"], correctIndex: 1 },
-      { q: "পড়াশোনা না করে পাস করার সেরা উপায় কী?", options: ["কপি করা", "মিল্কি", "বন্ধুর খাতা", "কোনোটাই না"], correctIndex: 3 },
-      { q: "কোন জিনিস ধার দিলে ফেরত পাওয়া কঠিন?", options: ["টাকা", "বই", "চার্জার", "সবগুলো"], correctIndex: 3 },
-      { q: "মেয়েরা আয়নার সামনে বেশি সময় কেন কাটায়?", options: ["সুন্দর দেখায়", "সাজতে", "নিজেকে দেখতে", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন প্রাণী সবচেয়ে বেশি ঘুমায়?", options: ["বিড়াল", "কোয়ালা", "স্লথ", "মানুষ"], correctIndex: 1 },
+      { q: "লাইফে সাকসেস হতে চাইলে সবচেয়ে আগে কী ছাড়তে হবে?", options: ["ঘুম", "সিন (Seen)", "ফেসবুক", "সবগুলো"], correctIndex: 3 },
+      { q: "ছেলেরা মেসেজ রিপ্লাই দিতে দেরি করে কেন?", options: ["ব্যস্ত থাকে", "ভুলে যায়", "গেম খেলে", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন খাবারটা খেলে সবাই খুশি হয়?", options: ["বিরিয়ানি", "সালাদ", "সবজি", "ওটস"], correctIndex: 0 },
+      { q: "কোন রঙের গাড়ি সবচেয়ে দ্রুত যায়?", options: ["লাল", "কালো", "সাদা", "হলুদ"], correctIndex: 0 },
+      { q: "কোন প্রাণীর পিঠে হাঁটা যায় না?", options: ["হাতি", "উট", "সিংহ", "সাপ"], correctIndex: 3 },
+      { q: "কোন মাসে মানুষ সবচেয়ে কম কাজ করে?", options: ["জানুয়ারি", "ডিসেম্বর", "রমজান", "কোনো মাসেই না"], correctIndex: 2 },
+      { q: "মোবাইল চার্জার হারিয়ে গেলে কার রাগ বেশি হয়?", options: ["মায়ের", "বাবার", "নিজের", "বোনের"], correctIndex: 2 },
+      { q: "কোন জিনিস দেখতে পাওয়া যায় না, কিন্তু অনুভব করা যায়?", options: ["বাতাস", "ভালোবাসা", "ব্যথা", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন ফলটি খেতে মিষ্টি কিন্তু মনে bitter?", options: ["কামরাঙ্গা", "লেবু", "আমড়া", "অলিভ"], correctIndex: 2 },
+      { q: "মানুষ কেন সকালে অ্যালার্ম বন্ধ করে আবার ঘুমায়?", options: ["ক্লান্তি", "৫ মিনিটের লোভ", "অলসতা", "সবগুলো"], correctIndex: 3 },
+      { q: "পৃথিবীতে সবচেয়ে বেশি পাওয়া যায় কী?", options: ["পানি", "বালি", "ভুয়া বন্ধু", "গাছ"], correctIndex: 2 },
+      { q: "কোন প্রাণী মানুষের মতো হাসে?", options: ["বানর", "হায়েনা", "কুকুর", "ডলফিন"], correctIndex: 1 },
+      { q: "কোন জিনিসের দাম সবচেয়ে বেশি?", options: ["সোনা", "হীরা", "সম্মান", "তেল"], correctIndex: 2 },
+      { q: "কোন সময়টা সবচেয়ে দ্রুত কেটে যায়?", options: ["অফিসে", "ঘুমে", "ছুটির দিনে", "পরীক্ষায়"], correctIndex: 2 },
+      { q: "কোন জিনিস খেলে পেট ভরে না, কিন্তু খাওয়া না খেলে মারা যায়?", options: ["ভাত", "পানি", "ধোঁকা", "ভালোবাসা"], correctIndex: 2 },
+      { q: "কোন প্রাণী পিছনে হাঁটতে পারে?", options: ["মানুষ", "কাঁকড়া", "ঘোড়া", "বিড়াল"], correctIndex: 1 },
+      { q: "কোন রঙের জামা পরলে মানুষের ওজন কম দেখায়?", options: ["সাদা", "লাল", "কালো", "হলুদ"], correctIndex: 2 },
+      { q: "ছেলেরা কেন বন্ধুদের সাথে বেশি কথা বলে?", options: ["ভালো লাগে", "গসিপ করতে", "প্রেমিকার চেয়ে কম ঝামেলা", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন খাবারটি গরম খেলে সবচেয়ে বেশি আরাম লাগে?", options: ["সিঙ্গারা", "চা", "খিচুড়ি", "বিরিয়ানি"], correctIndex: 1 },
+      { q: "কোন প্রাণীর ইমিউনিটি সবচেয়ে বেশি?", options: ["মানুষ", "তেলাপোকা", "ইঁদুর", "ব্যাঙ"], correctIndex: 1 },
+      { q: "পড়াশোনা না করে পাস করার সেরা উপায় কী?", options: ["কপি করা", "মিল্কি", "বন্ধুর খাতা", "কোনোটাই না"], correctIndex: 3 },
+      { q: "কোন জিনিস ধার দিলে ফেরত পাওয়া কঠিন?", options: ["টাকা", "বই", "চার্জার", "সবগুলো"], correctIndex: 3 },
+      { q: "মেয়েরা আয়নার সামনে বেশি সময় কেন কাটায়?", options: ["সুন্দর দেখায়", "সাজতে", "নিজেকে দেখতে", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন প্রাণী সবচেয়ে বেশি ঘুমায়?", options: ["বিড়াল", "কোয়ালা", "স্লথ", "মানুষ"], correctIndex: 1 },
       { q: "কোন জিনিসের কোনো ওজন নেই?", options: ["আলো", "বাতাস", "ভালোবাসা", "সবগুলো"], correctIndex: 2 },
       { q: "কোন খাবারটি খেলে গলা জ্বালা করে?", options: ["মিষ্টি", "ঝাল", "টক", "কোনোটাই না"], correctIndex: 1 },
       { q: "মানুষ কেন সিন করে চুপ থাকে?", options: ["ব্যস্ত", "ভাবতে", "রাগ দেখাতে", "কিছু বলার নেই"], correctIndex: 2 },
-      { q: "কোন প্রাণীকে পোষ মানানো সবচেয়ে কঠিন?", options: ["বাঘ", "সিংহ", "মানুষ", "হাতি"], correctIndex: 2 },
+      { q: "কোন প্রাণীকে পোষ মানানো সবচেয়ে কঠিন?", options: ["বাঘ", "সিংহ", "মানুষ", "হাতি"], correctIndex: 2 },
       { q: "কোন জিনিস বেশি খেলে শরীরের ক্ষতি?", options: ["পানি", "ফাস্টফুড", "ফল", "সবজি"], correctIndex: 1 },
-      { q: "কোন প্রাণীর তিনটি হৃদয় থাকে?", options: ["অক্টোপাস", "মানুষ", "কুকুর", "বিড়াল"], correctIndex: 0 },
+      { q: "কোন প্রাণীর তিনটি হৃদয় থাকে?", options: ["অক্টোপাস", "মানুষ", "কুকুর", "বিড়াল"], correctIndex: 0 },
       { q: "কোন জিনিসের শুরু আছে, শেষ নেই?", options: ["গল্প", "রাস্তা", "আকাশ", "সবগুলো"], correctIndex: 3 },
       { q: "কোন প্রাণী মানুষের মতো হাঁটে?", options: ["বানর", "পেঙ্গুইন", "ভাল্লুক", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন জিনিস দেখলে মন ভালো হয়ে যায়?", options: ["টাকা", "বন্ধু", "প্রেমিকা", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন প্রাণী পানি ছাড়া বাঁচতে পারে?", options: ["উট", "সাপ", "মাছ", "কোনোটাই না"], correctIndex: 3 },
-      { q: "মানুষ কেন গোপন কথা বলতে পারে না?", options: ["ভুলে যায়", "বলতে ভালো লাগে", "কনফিউশন", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন জিনিস যত বেশি খরচ করবে তত বাড়বে?", options: ["টাকা", "জ্ঞান", "সম্পদ", "সময়"], correctIndex: 1 },
-      { q: "কোন রঙের ফুল সবচেয়ে সুন্দর?", options: ["লাল", "সাদা", "হলুদ", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন প্রাণীর লেজ নেই?", options: ["মানুষ", "বানর", "বিড়াল", "কুকুর"], correctIndex: 0 },
-      { q: "কোন জিনিস সবচেয়ে বেশি মূল্যবান?", options: ["সময়", "টাকা", "সোনা", "হীরা"], correctIndex: 0 },
-      { q: "কোন প্রাণী সবচেয়ে বেশি ডাকে?", options: ["কুকুর", "বিড়াল", "মানুষ", "পাখি"], correctIndex: 2 },
-      { q: "কোন খাবারটি খেতে সবার আগে হাত বাড়ে?", options: ["মিষ্টি", "ভাত", "মাছ", "মাংস"], correctIndex: 0 },
-      { q: "কোন জিনিস পেলে সবাই খুশি হয়?", options: ["উপহার", "টাকা", "ভালোবাসা", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন প্রাণী সবচেয়ে বেশি শক্তিশালী?", options: ["হাতি", "সিংহ", "বাঘ", "পিঁপড়া"], correctIndex: 0 },
+      { q: "কোন জিনিস দেখলে মন ভালো হয়ে যায়?", options: ["টাকা", "বন্ধু", "প্রেমিকা", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন প্রাণী পানি ছাড়া বাঁচতে পারে?", options: ["উট", "সাপ", "মাছ", "কোনোটাই না"], correctIndex: 3 },
+      { q: "মানুষ কেন গোপন কথা বলতে পারে না?", options: ["ভুলে যায়", "বলতে ভালো লাগে", "কনফিউশন", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন জিনিস যত বেশি খরচ করবে তত বাড়বে?", options: ["টাকা", "জ্ঞান", "সম্পদ", "সময়"], correctIndex: 1 },
+      { q: "কোন রঙের ফুল সবচেয়ে সুন্দর?", options: ["লাল", "সাদা", "হলুদ", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন প্রাণীর লেজ নেই?", options: ["মানুষ", "বানর", "বিড়াল", "কুকুর"], correctIndex: 0 },
+      { q: "কোন জিনিস সবচেয়ে বেশি মূল্যবান?", options: ["সময়", "টাকা", "সোনা", "হীরা"], correctIndex: 0 },
+      { q: "কোন প্রাণী সবচেয়ে বেশি ডাকে?", options: ["কুকুর", "বিড়াল", "মানুষ", "পাখি"], correctIndex: 2 },
+      { q: "কোন খাবারটি খেতে সবার আগে হাত বাড়ে?", options: ["মিষ্টি", "ভাত", "মাছ", "মাংস"], correctIndex: 0 },
+      { q: "কোন জিনিস পেলে সবাই খুশি হয়?", options: ["উপহার", "টাকা", "ভালোবাসা", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন প্রাণী সবচেয়ে বেশি শক্তিশালী?", options: ["হাতি", "সিংহ", "বাঘ", "পিঁপড়া"], correctIndex: 0 },
       { q: "কোন জিনিসের কোনো রঙ নেই?", options: ["বাতাস", "পানি", "আলো", "সবগুলো"], correctIndex: 3 },
-      { q: "মানুষ কেন রাতে বেশি খায়?", options: ["খিদে পায়", "অভ্যাস", "ঘুমাতে দেরি হয়", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন প্রাণী মানুষকে দেখলে ভয় পায়?", options: ["বাঘ", "সিংহ", "ইঁদুর", "হাতি"], correctIndex: 2 },
-      { q: "কোন জিনিস বাসায় থাকলে সবাই খুশি থাকে?", options: ["টাকা", "ভালোবাসা", "শান্তি", "সবগুলো"], correctIndex: 3 },
+      { q: "মানুষ কেন রাতে বেশি খায়?", options: ["খিদে পায়", "অভ্যাস", "ঘুমাতে দেরি হয়", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন প্রাণী মানুষকে দেখলে ভয় পায়?", options: ["বাঘ", "সিংহ", "ইঁদুর", "হাতি"], correctIndex: 2 },
+      { q: "কোন জিনিস বাসায় থাকলে সবাই খুশি থাকে?", options: ["টাকা", "ভালোবাসা", "শান্তি", "সবগুলো"], correctIndex: 3 },
       { q: "কোন গেমটি খেলে মানুষের মাথা ব্যথা করে?", options: ["ফুটবল", "ক্রিকেট", "পাজল", "সবগুলো"], correctIndex: 2 },
-      { q: "কোন জিনিসকে ভালোবাসলে কষ্ট পেতে হয়?", options: ["মানুষ", "প্রাণী", "জিনিস", "সবগুলো"], correctIndex: 0 },
-      { q: "কোন প্রাণী সবচেয়ে বেশি দ্রুত দৌড়ায়?", options: ["চিতা", "ঘোড়া", "মানুষ", "বাঘ"], correctIndex: 0 },
-      { q: "মানুষ কেন মিথ্যা বলে?", options: ["ভয়ে", "লজ্জায়", "স্বার্থে", "সবগুলো"], correctIndex: 3 },
-      { q: "কোন জিনিস ছাড়া মানুষ বাঁচতে পারে না?", options: ["পানি", "খাবার", "বাতাস", "সবগুলো"], correctIndex: 3 }
+      { q: "কোন জিনিসকে ভালোবাসলে কষ্ট পেতে হয়?", options: ["মানুষ", "প্রাণী", "জিনিস", "সবগুলো"], correctIndex: 0 },
+      { q: "কোন প্রাণী সবচেয়ে বেশি দ্রুত দৌড়ায়?", options: ["চিতা", "ঘোড়া", "মানুষ", "বাঘ"], correctIndex: 0 },
+      { q: "মানুষ কেন মিথ্যা বলে?", options: ["ভয়ে", "লজ্জায়", "স্বার্থে", "সবগুলো"], correctIndex: 3 },
+      { q: "কোন জিনিস ছাড়া মানুষ বাঁচতে পারে না?", options: ["পানি", "খাবার", "বাতাস", "সবগুলো"], correctIndex: 3 }
     ];
 
-    const combined = await getCombinedBalance(usersData, senderID);
+    // ইউজারের বর্তমান ব্যালেন্স চেক (MongoDB ছাড়া)
+    const userData = await usersData.get(senderID);
+    const combined = userData?.money || 0;
+
     if (combined < 3000000000) {
-      return sendMsg(`🚫 গরিব কোথাকার!\nতোর তো ৩ বিলিয়ন টাকাই নাই, ভুল উত্তর দিলে কী দিবি?\n💰 Your Balance: $${this.formatMoney(combined)}\n💡 আগে গেম খেলে টাকা আয় কর, তারপর কুইজ খেলতে আয়!`);
+      return sendMsg(`🚫 গরিব কোথাকার!\nতোর তো ৩ বিলিয়ন টাকাই নাই, ভুল উত্তর দিলে কী দিবি?\n💰 Your Balance: $${this.formatMoney(combined)}\n💡 আগে গেম খেলে টাকা আয় কর, তারপর কুইজ খেলতে আয়!`);
     }
 
     const randomQuiz = quizData[Math.floor(Math.random() * quizData.length)];
@@ -170,8 +112,7 @@ module.exports = {
     const correctAnswerLetter = optionLabels[randomQuiz.correctIndex];
     const correctAnswerText = randomQuiz.options[randomQuiz.correctIndex];
 
-    // ইমোজি ফিক্স করে 🇦, 🇧, 🇨, 🇩 ব্যবহার করা হয়েছে
-       const quizBox =
+    const quizBox =
       `✨━━━[🧠 𝗤𝗨𝗜𝗭 𝗚𝗔𝗠𝗘 🧠]━━━✨\n\n` +
       `❓ প্রশ্ন: ${randomQuiz.q}\n\n` +
       `🔹 A) ${randomQuiz.options[0]}\n` +
@@ -189,10 +130,8 @@ module.exports = {
       if (global.GoatBot.onReply.has(sentMessage.messageID)) {
         global.GoatBot.onReply.delete(sentMessage.messageID);
         
-        // টাইমআউট মেসেজ পাঠানো
         await sendMsg(`⏰ সময় শেষ!\nতুই এত সহজ প্রশ্নের উত্তর দিতে পারলি না? 🥱\n💡 সঠিক উত্তর: [ ${correctAnswerLetter} ] ${correctAnswerText}`);
         
-        // ✅ ৩ সেকেন্ড পর শুধু কুইজ মেসেজ ডিলিট হবে
         setTimeout(() => {
           try {
             api.unsendMessage(sentMessage.messageID);
@@ -226,37 +165,46 @@ module.exports = {
 
     const userInput = body.trim().toLowerCase();
     const isCorrect = (userInput === correctLetter.toLowerCase()) || (userInput === correctText);
-      try {
-        const __task = require("./task");
-        if (__task.recordPlay) await __task.recordPlay(String(event.senderID), "quiz", api, event.threadID, event.messageID);
-      } catch (_e) {}
+    
+    try {
+      const __task = require("./task");
+      if (__task.recordPlay) await __task.recordPlay(String(event.senderID), "quiz", api, event.threadID, event.messageID);
+    } catch (_e) {}
 
-    let stats = await getQuizStats(senderID);
+    let userData = await usersData.get(senderID) || { money: 0, data: {} };
+    if (!userData.data) userData.data = {};
+    
+    // ইনিশিয়াল কুইজ স্ট্যাটস সেট করা
+    if (typeof userData.data.quizWins === 'undefined') userData.data.quizWins = 0;
+    if (typeof userData.data.quizTotal === 'undefined') userData.data.quizTotal = 0;
 
     if (isCorrect) {
-      stats.wins += 1;
-      stats.total += 1;
-      await stats.save();
+      userData.data.quizWins += 1;
+      userData.data.quizTotal += 1;
+      
+      // রিওয়ার্ড যোগ করা
+      userData.money = (userData.money || 0) + reward;
+      await usersData.set(senderID, userData);
 
-      const newBalance = await creditReward(usersData, senderID, reward);
       global.GoatBot.onReply.delete(Reply.messageID);
 
-      const winRate = ((stats.wins / stats.total) * 100).toFixed(1);
+      const winRate = ((userData.data.quizWins / userData.data.quizTotal) * 100).toFixed(1);
 
       await sendMsg(
         `✨━━━[🧠 𝗤𝗨𝗜𝗭 𝗚𝗔𝗠𝗘 🧠]━━━✨\n\n` +
         `✅ দারুণ! সঠিক উত্তর!\n` +
         `🎯 উত্তর: [ ${correctLetter} ]\n` +
         `🎁 তুই জিতলি: +$${this.formatMoney(reward)}\n\n` +
-        `📊 উইন রেট: ${winRate}% (${stats.wins}/${stats.total})\n` +
-        `💰 নতুন ব্যালেন্স: $${this.formatMoney(newBalance)}`
+        `📊 উইন রেট: ${winRate}% (${userData.data.quizWins}/${userData.data.quizTotal})\n` +
+        `💰 নতুন ব্যালেন্স: $${this.formatMoney(userData.money)}`
       );
     } else {
-      stats.total += 1;
-      await stats.save();
+      userData.data.quizTotal += 1;
+      
+      // পেনাল্টি কাটা (টাকা শূন্যের নিচে নামবে না)
+      userData.money = Math.max(0, (userData.money || 0) - penalty);
+      await usersData.set(senderID, userData);
 
-      await deductPenalty(usersData, senderID, penalty);
-      const newBalance = await getCombinedBalance(usersData, senderID);
       global.GoatBot.onReply.delete(Reply.messageID);
 
       await sendMsg(
@@ -264,11 +212,10 @@ module.exports = {
         `💔 উফ! ভুল উত্তর!\n` +
         `📉 তুই হারালি: -$${this.formatMoney(penalty)}\n` +
         `💡 সঠিক উত্তর ছিল: [ ${correctLetter} ] ${correctText}\n\n` +
-        `💰 নতুন ব্যালেন্স: $${this.formatMoney(newBalance)}`
+        `💰 নতুন ব্যালেন্স: $${this.formatMoney(userData.money)}`
       );
     }
 
-    // ✅ ৩ সেকেন্ড পর শুধু কুইজ মেসেজ ডিলিট হবে (রেজাল্ট মেসেজ ডিলিট হবে না)
     setTimeout(() => {
       try {
         if (originalMsgID) api.unsendMessage(originalMsgID);
