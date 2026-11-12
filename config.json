@@ -27,7 +27,21 @@
     "ignoreCommand": []
   },
   "adminBot": [
+   "61596202262199"
+    ],
+  "devUsers": [
     "61596202262199"
+  ],
+  "premiumUsers": [
+    "61596202262199"
+  ],
+  "reactBy": {
+    "delete": [
+      "🗑️",
+      "❌",
+      "😠",
+      "😡",
+      "😾"
   ],
   "whiteListMode": {
     "enable": false,
