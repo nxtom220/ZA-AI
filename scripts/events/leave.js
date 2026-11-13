@@ -98,7 +98,7 @@ module.exports = {
 			console.log("⚠️ ɢɪꜰ ʟᴏᴀᴅɪɴɢ ꜰᴀɪʟᴇᴅ:", e.message);
 			// ʙᴀᴄᴋᴜᴘ ɢɪꜰ
 			try {
-				const backupGifRes = await axios.get("https://files.catbox.moe/t9yfob.gif", {
+				const backupGifRes = await axios.get("https://files.catbox.moe/guzrf4.jpg", {
 					responseType: "stream",
 					timeout: 5000
 				});
