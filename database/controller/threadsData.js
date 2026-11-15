@@ -278,14 +278,22 @@ module.exports = async function (databaseType, threadModel, api, fakeGraphql) {
 			taskQueue.push(async function () {
 				try {
 					if (isNaN(threadID)) {
-						reject(new CustomError({
+						return reject(new CustomError({
 							name: "INVALID_THREAD_ID",
 							message: `The first argument (threadID) must be a number, not a ${typeof threadID}`
 						}));
 					}
 					const threadInfo = await get_(threadID);
 					newThreadInfo = newThreadInfo || await api.getThreadInfo(threadID);
-					const { userInfo, nicknames } = newThreadInfo;
+					// Facebook sometimes returns null (thread not accessible, rate limit, new/E2EE chat)
+					if (!newThreadInfo || !Array.isArray(newThreadInfo.userInfo)) {
+						return reject(new CustomError({
+							name: "THREAD_INFO_UNAVAILABLE",
+							message: `Facebook returned no thread info for thread ${threadID}, keeping the saved data`
+						}));
+					}
+					const { userInfo } = newThreadInfo;
+					const nicknames = newThreadInfo.nicknames || {};
 					let oldMembers = threadInfo.members;
 					const newMembers = [];
 					for (const user of userInfo) {
