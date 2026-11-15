@@ -134,6 +134,56 @@ function removeFile(filePath) {
 	catch (e) { }
 }
 
+function decodeHtml(str) {
+	return String(str || "")
+		.replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return ""; } })
+		.replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch (e) { return ""; } })
+		.replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+		.replace(/\s+/g, " ").trim();
+}
+
+function platformName(link) {
+	let host = "";
+	try { host = new URL(link).hostname.toLowerCase().replace(/^www\./, ""); } catch (e) { }
+	const map = [
+		[/youtube\.com|youtu\.be/, "YOUTUBE"], [/facebook\.com|fb\.watch|fb\.com/, "FACEBOOK"],
+		[/instagram\.com/, "INSTAGRAM"], [/tiktok\.com/, "TIKTOK"], [/twitter\.com|x\.com/, "TWITTER"],
+		[/pinterest\.com|pin\.it/, "PINTEREST"], [/reddit\.com|redd\.it/, "REDDIT"], [/threads\.net/, "THREADS"],
+		[/snapchat\.com/, "SNAPCHAT"], [/likee/, "LIKEE"], [/capcut\.com/, "CAPCUT"], [/vimeo\.com/, "VIMEO"],
+		[/dailymotion\.com/, "DAILYMOTION"], [/soundcloud\.com/, "SOUNDCLOUD"], [/twitch\.tv/, "TWITCH"],
+		[/linkedin\.com/, "LINKEDIN"], [/tumblr\.com/, "TUMBLR"], [/bilibili\.com/, "BILIBILI"]
+	];
+	for (const [re, name] of map)
+		if (re.test(host))
+			return name;
+	return host.toUpperCase() || "UNKNOWN";
+}
+
+function formatSize(bytes) {
+	const mb = bytes / (1024 * 1024);
+	return mb >= 1 ? `${mb.toFixed(2)} MB` : `${(bytes / 1024).toFixed(2)} KB`;
+}
+
+function buildCaption({ title, link, kind, item, size, seconds }) {
+	let t = decodeHtml(title) || "Untitled";
+	if (t.length > 60)
+		t = t.slice(0, 60).trim() + "…";
+	const fileType = kind === "audio" ? "🎵 AUDIO" : kind === "image" ? "🖼️ IMAGE" : "🎬 VIDEO";
+	const quality = String(item.quality || "HD").toUpperCase();
+	return [
+		"🎬 DOWNLOAD COMPLETE 🎬",
+		"────────────────────",
+		`✏️ TITLE — ${t}`,
+		`👑 PLATFORM — ${platformName(link)}`,
+		`📁 FILE — ${fileType}`,
+		`⚡ QUALITY — ${quality}`,
+		`⛓️  SIZE — ${formatSize(size)}`,
+		`⏰ TIME — ${seconds}s`,
+		"────────────────────",
+		"⚙️ POWERED BY AKASH"
+	].join("\n");
+}
+
 module.exports = {
 	config: {
 		name: "autodl",
@@ -197,6 +247,7 @@ module.exports = {
 
 			let filePath;
 			try {
+				const startedAt = Date.now();
 				react(api, messageID, "⏳");
 				const info = await fetchMedia(link);
 				const { kind, item } = pickMedia(info.media);
@@ -204,8 +255,16 @@ module.exports = {
 				fs.ensureDirSync(TMP_DIR);
 				filePath = path.join(TMP_DIR, `autodl_${Date.now()}_${safeName(info.title)}.${ext}`);
 				await downloadToFile(item.url, filePath);
+				const caption = buildCaption({
+					title: info.title,
+					link,
+					kind,
+					item,
+					size: fs.statSync(filePath).size,
+					seconds: ((Date.now() - startedAt) / 1000).toFixed(2)
+				});
 				await message.reply({
-					body: info.title ? `📥 ${info.title}` : "📥 Downloaded",
+					body: caption,
 					attachment: fs.createReadStream(filePath)
 				});
 				react(api, messageID, "✅");
