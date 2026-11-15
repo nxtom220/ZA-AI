@@ -27,7 +27,8 @@ const SUPPORTED = [
 	"twitch.tv",
 	"linkedin.com",
 	"tumblr.com",
-	"bilibili.com"
+	"bilibili.com",
+	"douyin.com", "kwai.com", "kuaishou.com", "sharechat.com", "rumble.com"
 ];
 
 const URL_REGEX = /https?:\/\/[^\s<>"'\]\[]+/gi;
@@ -118,12 +119,71 @@ function linksFromMessage(msg) {
 
 function collectLinks(event) {
 	let found = linksFromMessage(event);
+	// the link may sit in a field we do not know about: scan the whole event object
+	if (!found.length) {
+		try {
+			const rest = { ...event };
+			delete rest.participantIDs;
+			for (const str of collectStrings(rest, [], 0))
+				for (const l of linksFromString(str))
+					if (!found.includes(l))
+						found.push(l);
+		}
+		catch (e) { }
+	}
 	// replying to a shared link with the word "autodl" downloads the replied message's link
 	if (!found.length && event.messageReply && /autodl|autodown/i.test(String(event.body || "")))
 		found = linksFromMessage(event.messageReply);
 	// non-facebook links first (a shared card can also contain a facebook.com redirect)
 	found.sort((x, y) => Number(/facebook\.com|fb\.com/.test(hostOf(x))) - Number(/facebook\.com|fb\.com/.test(hostOf(y))));
 	return found;
+}
+
+// call an api method that may use a callback OR return a promise, with a timeout
+function callApi(run) {
+	return new Promise(resolve => {
+		let done = false;
+		const finish = v => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
+		const timer = setTimeout(() => finish(null), 8000);
+		try {
+			const r = run((err, data) => finish(err ? null : data));
+			if (r && typeof r.then === "function")
+				r.then(finish).catch(() => finish(null));
+		}
+		catch (e) { finish(null); }
+	});
+}
+
+// Shared cards (TikTok / Instagram app "share to Messenger") reach the bot without the link.
+// Ask Facebook for the same message again, its full data still has the link.
+async function linksViaLookup(api, event) {
+	const { threadID, messageID } = event;
+	const tries = [];
+	for (const name of ["getMessage", "getMessageInfo", "fetchMessage"])
+		if (typeof api[name] === "function")
+			tries.push(() => callApi(cb => api[name](threadID, messageID, cb)));
+	if (typeof api.getThreadHistory === "function")
+		tries.push(() => callApi(cb => api.getThreadHistory(threadID, 10, null, cb)));
+	for (const t of tries) {
+		const data = await t();
+		if (!data)
+			continue;
+		const list = Array.isArray(data) ? data : [data];
+		const same = list.filter(m => m && String(m.messageID) === String(messageID));
+		for (const m of (same.length ? same : list.slice(-3))) {
+			const got = [];
+			try {
+				for (const str of collectStrings(m, [], 0))
+					for (const l of linksFromString(str))
+						if (!got.includes(l))
+							got.push(l);
+			}
+			catch (e) { }
+			if (got.length && (same.length || String(m.senderID) === String(event.senderID)))
+				return got;
+		}
+	}
+	return [];
 }
 
 function safeName(name) {
@@ -389,7 +449,9 @@ module.exports = {
 			// never react to the bot's own messages (prevents loops)
 			if (String(senderID) === String(api.getCurrentUserID()))
 				return;
-			const links = collectLinks(event);
+			let links = collectLinks(event);
+			if (!links.length && Array.isArray(event.attachments) && event.attachments.some(a => a && a.type === "share"))
+				links = await linksViaLookup(api, event);
 			if (!links.length) {
 				const cards = (Array.isArray(event.attachments) ? event.attachments : []).filter(a => a && a.type === "share");
 				if (cards.length) {
