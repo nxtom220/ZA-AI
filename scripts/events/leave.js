@@ -88,7 +88,7 @@ module.exports = {
 
 		// 🌟 ᴀᴜᴛᴏᴍᴀᴛɪᴄ ʟᴇᴀᴠᴇ ɢɪꜰ
 		try {
-			const gifRes = await axios.get("https://files.catbox.moe/guzrf4.jpg", { 
+			const gifRes = await axios.get("https://files.catbox.moe/wf19w9.jpg", { 
 				responseType: "stream",
 				timeout: 10000 
 			});
@@ -98,7 +98,7 @@ module.exports = {
 			console.log("⚠️ ɢɪꜰ ʟᴏᴀᴅɪɴɢ ꜰᴀɪʟᴇᴅ:", e.message);
 			// ʙᴀᴄᴋᴜᴘ ɢɪꜰ
 			try {
-				const backupGifRes = await axios.get("https://files.catbox.moe/guzrf4.jpg", {
+				const backupGifRes = await axios.get("https://files.catbox.moe/wf19w9.jpg", {
 					responseType: "stream",
 					timeout: 5000
 				});
