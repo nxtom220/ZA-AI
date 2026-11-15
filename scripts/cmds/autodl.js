@@ -63,22 +63,52 @@ function extractLinks(text) {
 	return [...new Set(links.map(l => unwrapRedirect(l.replace(/[).,!?]+$/, ""))))].filter(isSupported);
 }
 
-// links from the text AND from shared-link attachments (attachment type "share")
+// Walk through ANY nested value of the attachment and collect every string in it.
+// Messenger puts the shared link in different fields depending on the app / platform
+// (url, facebookUrl, target.url, story_attachment.url, source, description ...),
+// so we do not guess the field name, we scan all of them.
+function collectStrings(value, out, depth) {
+	if (depth > 6 || value == null)
+		return out;
+	if (typeof value === "string")
+		out.push(value);
+	else if (Array.isArray(value))
+		for (const v of value)
+			collectStrings(v, out, depth + 1);
+	else if (typeof value === "object")
+		for (const k of Object.keys(value))
+			collectStrings(value[k], out, depth + 1);
+	return out;
+}
+
+function linksFromString(str) {
+	const variants = [str];
+	try { variants.push(decodeURIComponent(str)); } catch (e) { }
+	const found = [];
+	for (const v of variants)
+		for (const l of (String(v).match(URL_REGEX) || []))
+			found.push(unwrapRedirect(l.replace(/[).,!?]+$/, "")));
+	return found.filter(isSupported);
+}
+
+// links from the text AND from shared-link attachments / replied message
+// so the link works with or without the word "autodl" in front of it
 function collectLinks(event) {
 	const found = [...extractLinks(event.body)];
 	const attachments = Array.isArray(event.attachments) ? event.attachments : [];
 	for (const att of attachments) {
-		if (!att || att.type !== "share")
+		if (!att || typeof att !== "object")
 			continue;
-		const candidates = [att.url, att.facebookUrl, att.target && att.target.url, att.source_url, att.playableUrl];
-		for (const c of candidates) {
-			if (typeof c !== "string" || !/^https?:\/\//i.test(c))
-				continue;
-			const link = unwrapRedirect(c);
-			if (isSupported(link) && !found.includes(link))
-				found.push(link);
-		}
+		// photos / voice / stickers never carry a downloadable page link
+		if (["photo", "sticker", "audio", "animated_image"].includes(att.type))
+			continue;
+		for (const str of collectStrings(att, [], 0))
+			for (const link of linksFromString(str))
+				if (!found.includes(link))
+					found.push(link);
 	}
+	// non-facebook links first (a shared TikTok card can also contain a facebook.com redirect)
+	found.sort((a, b) => Number(/facebook\.com|fb\.com/.test(hostOf(a))) - Number(/facebook\.com|fb\.com/.test(hostOf(b))));
 	return found;
 }
 
@@ -310,9 +340,9 @@ function buildCaption({ title, link, kind, item, size, seconds }) {
 		`✏️ TITLE — ${t}`,
 		`👑 PLATFORM — ${platformName(link)}`,
 		`📁 FILE — ${fileType}`,
-		`⚡ QUALITY — ${quality}`,
-		`⛓️  SIZE — ${formatSize(size)}`,
-		`⏰ TIME — ${seconds}s`,
+		`🗿 QUALITY — ${quality}`,
+		`🏷️  SIZE — ${formatSize(size)}`,
+		`🕦 TIME — ${seconds}s`,
 		"────────────────────",
 		"⚙️ POWERED BY AKASH"
 	].join("\n");
@@ -346,8 +376,16 @@ module.exports = {
 			if (String(senderID) === String(api.getCurrentUserID()))
 				return;
 			const links = collectLinks(event);
-			if (!links.length)
+			if (!links.length) {
+				// help debugging: show what a shared card looks like when no link was found
+				if (Array.isArray(event.attachments) && event.attachments.some(a => a && ["share", "link", "video", "unknown"].includes(a.type))) {
+					try {
+						console.log("[AUTODL] no supported link found. attachment dump:", JSON.stringify(event.attachments).slice(0, 1500));
+					}
+					catch (e) { }
+				}
 				return;
+			}
 
 			// the same message can arrive twice, handle it only once
 			if (messageID) {
