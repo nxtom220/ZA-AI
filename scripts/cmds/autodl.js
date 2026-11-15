@@ -32,18 +32,54 @@ const SUPPORTED = [
 
 const URL_REGEX = /https?:\/\/[^\s<>"'\]\[]+/gi;
 const inProgress = new Set();
+const handledMessages = new Set();
+
+function isSupported(link) {
+	try {
+		const host = new URL(link).hostname.toLowerCase().replace(/^www\./, "");
+		return SUPPORTED.some(d => host === d || host.endsWith("." + d));
+	}
+	catch (e) {
+		return false;
+	}
+}
+
+// Messenger wraps shared links like https://l.facebook.com/l.php?u=<real link>
+function unwrapRedirect(link) {
+	try {
+		const url = new URL(link);
+		if (/(^|\.)facebook\.com$/.test(url.hostname) && /^\/(l\.php|flx\/warn)/.test(url.pathname)) {
+			const real = url.searchParams.get("u");
+			if (real)
+				return real;
+		}
+	}
+	catch (e) { }
+	return link;
+}
 
 function extractLinks(text) {
 	const links = String(text || "").match(URL_REGEX) || [];
-	return [...new Set(links.map(l => l.replace(/[).,!?]+$/, "")))].filter(link => {
-		try {
-			const host = new URL(link).hostname.toLowerCase().replace(/^www\./, "");
-			return SUPPORTED.some(d => host === d || host.endsWith("." + d));
+	return [...new Set(links.map(l => unwrapRedirect(l.replace(/[).,!?]+$/, ""))))].filter(isSupported);
+}
+
+// links from the text AND from shared-link attachments (attachment type "share")
+function collectLinks(event) {
+	const found = [...extractLinks(event.body)];
+	const attachments = Array.isArray(event.attachments) ? event.attachments : [];
+	for (const att of attachments) {
+		if (!att || att.type !== "share")
+			continue;
+		const candidates = [att.url, att.facebookUrl, att.target && att.target.url, att.source_url, att.playableUrl];
+		for (const c of candidates) {
+			if (typeof c !== "string" || !/^https?:\/\//i.test(c))
+				continue;
+			const link = unwrapRedirect(c);
+			if (isSupported(link) && !found.includes(link))
+				found.push(link);
 		}
-		catch (e) {
-			return false;
-		}
-	});
+	}
+	return found;
 }
 
 function safeName(name) {
@@ -57,19 +93,117 @@ function react(api, messageID, emoji) {
 	catch (e) { }
 }
 
-async function fetchMedia(link) {
+function hostOf(link) {
+	try {
+		return new URL(link).hostname.toLowerCase().replace(/^www\./, "");
+	}
+	catch (e) {
+		return "";
+	}
+}
+
+function absUrl(u, base) {
+	if (!u || typeof u !== "string")
+		return null;
+	if (/^https?:\/\//i.test(u))
+		return u;
+	if (u.startsWith("//"))
+		return "https:" + u;
+	if (u.startsWith("/"))
+		return base + u;
+	return u;
+}
+
+// short links (vt.tiktok.com, fb.watch, ...) -> real link
+async function resolveUrl(link) {
+	try {
+		const res = await axios.get(link, {
+			timeout: 15000,
+			maxRedirects: 5,
+			responseType: "stream",
+			headers: { "user-agent": USER_AGENT },
+			validateStatus: () => true
+		});
+		const finalUrl = (res.request && res.request.res && res.request.res.responseUrl) || link;
+		res.data.destroy();
+		return finalUrl;
+	}
+	catch (e) {
+		return link;
+	}
+}
+
+async function viaNeokex(link) {
 	const { data } = await axios.get(`${API}/dl`, {
 		params: { url: link },
 		timeout: 90000,
 		headers: { "user-agent": USER_AGENT }
 	});
 	if (!data || data.status === false || !data.result)
-		throw new Error((data && data.message) || "Download failed");
+		throw new Error((data && data.message) || "API returned no result");
 	const result = data.result;
-	const media = (result.media || []).filter(m => m && m.url);
+	let media = (result.media || []).filter(m => m && m.url);
+	if (!media.length) {
+		const single = result.video || result.url || result.download || result.play;
+		if (typeof single === "string")
+			media = [{ type: "video", quality: "hd", url: single, extension: "mp4" }];
+	}
 	if (!media.length)
 		throw new Error("No downloadable media found");
 	return { title: result.title || "", media };
+}
+
+async function viaTikwm(link) {
+	const base = "https://www.tikwm.com";
+	const { data } = await axios.get(`${base}/api/`, {
+		params: { url: link, hd: 1 },
+		timeout: 45000,
+		headers: { "user-agent": USER_AGENT }
+	});
+	if (!data || data.code !== 0 || !data.data)
+		throw new Error((data && data.msg) || "API returned no result");
+	const d = data.data;
+	const media = [];
+	if (d.hdplay)
+		media.push({ type: "video", quality: "hd", url: absUrl(d.hdplay, base), extension: "mp4" });
+	if (d.play)
+		media.push({ type: "video", quality: "sd", url: absUrl(d.play, base), extension: "mp4" });
+	if (!media.length && Array.isArray(d.images) && d.images.length)
+		media.push({ type: "image", quality: "hd", url: absUrl(d.images[0], base), extension: "jpg" });
+	const valid = media.filter(m => m.url);
+	if (!valid.length)
+		throw new Error("No downloadable media found");
+	return { title: d.title || "", media: valid };
+}
+
+// tries several sources one after another, so one broken API does not stop the download
+async function fetchMedia(link) {
+	const isTiktok = /(^|\.)tiktok\.com$/.test(hostOf(link));
+	const providers = isTiktok
+		? [
+			["tikwm", () => viaTikwm(link)],
+			["neokex", async () => viaNeokex(await resolveUrl(link))]
+		]
+		: [
+			["neokex", () => viaNeokex(link)],
+			["neokex-resolved", async () => {
+				const resolved = await resolveUrl(link);
+				if (resolved === link)
+					throw new Error("link has no redirect");
+				return viaNeokex(resolved);
+			}]
+		];
+	const errors = [];
+	for (const [name, run] of providers) {
+		try {
+			return await run();
+		}
+		catch (err) {
+			const msg = (err && err.response && err.response.status ? `HTTP ${err.response.status}` : (err && err.message)) || "unknown error";
+			errors.push(`${name}: ${msg}`);
+		}
+	}
+	throw new Error(errors.join(" | "));
 }
 
 function pickMedia(media) {
@@ -197,47 +331,33 @@ module.exports = {
 		},
 		category: "media",
 		guide: {
-			en: "   {pn} on: turn on auto download in this chat"
-				+ "\n   {pn} off: turn off auto download in this chat"
-				+ "\n   Then just send any video link, no command needed."
+			en: "Always on in every chat. Just send or share any video link, no command needed."
 		}
 	},
 
-	langs: {
-		en: {
-			turnedOn: "✅ Auto download is now ON in this chat.",
-			turnedOff: "❎ Auto download is now OFF in this chat.",
-			status: "Auto download is currently: %1"
-		}
-	},
-
-	onStart: async function ({ args, event, message, threadsData, getLang }) {
-		const sub = (args[0] || "").toLowerCase();
-		if (sub === "on" || sub === "off") {
-			await threadsData.set(event.threadID, sub === "on", "data.autodl");
-			return message.reply(getLang(sub === "on" ? "turnedOn" : "turnedOff"));
-		}
-		const current = await threadsData.get(event.threadID, "data.autodl");
-		return message.reply(getLang("status", current === false ? "OFF" : "ON") + "\n" + "Use: autodl on / autodl off");
-	},
+	// Required by the bot loader. Auto download is always active, there is nothing to turn on or off.
+	onStart: async function () { },
 
 	// Runs on every message. No prefix needed.
-	onChat: async function ({ api, event, message, threadsData }) {
+	onChat: async function ({ api, event, message }) {
 		try {
-			const { body, senderID, threadID, messageID } = event;
-			if (!body || typeof body !== "string")
-				return;
+			const { senderID, threadID, messageID } = event;
 			// never react to the bot's own messages (prevents loops)
 			if (String(senderID) === String(api.getCurrentUserID()))
 				return;
-			// per-thread switch (default ON)
-			const enabled = await threadsData.get(threadID, "data.autodl");
-			if (enabled === false)
-				return;
-
-			const links = extractLinks(body);
+			const links = collectLinks(event);
 			if (!links.length)
 				return;
+
+			// the same message can arrive twice, handle it only once
+			if (messageID) {
+				if (handledMessages.has(messageID))
+					return;
+				handledMessages.add(messageID);
+				const timer = setTimeout(() => handledMessages.delete(messageID), 5 * 60 * 1000);
+				if (timer && timer.unref)
+					timer.unref();
+			}
 
 			const link = links[0];
 			const lockKey = `${threadID}:${link}`;
@@ -271,8 +391,17 @@ module.exports = {
 			}
 			catch (err) {
 				react(api, messageID, "❌");
-				if (err && err.message === "too large")
+				const reason = String((err && err.message) || err || "unknown error");
+				try {
+					global.utils.log.err("AUTODL", `Download failed for ${link}`, reason);
+				}
+				catch (e) {
+					console.log("[AUTODL] Download failed for", link, "|", reason);
+				}
+				if (reason === "too large")
 					await message.reply("❌ Video is bigger than 83MB, can't send it here.");
+				else
+					await message.reply(`❌ Download failed\n${reason.slice(0, 300)}`);
 			}
 			finally {
 				inProgress.delete(lockKey);
