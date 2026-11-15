@@ -558,10 +558,14 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
             const allOnChat = GoatBot.onChat || [];
             const args = body ? body.split(/ +/) : [];
             for (const key of allOnChat) {
-                const command = GoatBot.commands.get(key);
+                if (typeof key !== "string")
+                    continue;
+                // commands are stored in lowercase (see loadScripts.js), onChat list keeps the original name
+                const command = GoatBot.commands.get(key.toLowerCase());
                 if (!command)
                     continue;
                 const commandName = command.config.name;
+                try {
 
                 const roleConfig = getRoleConfig(utils, command, isGroup, threadData, commandName);
                 const needRole = roleConfig.onChat;
@@ -603,6 +607,11 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
                     .catch(err => {
                         log.err("onChat", `An error occurred when calling the command onChat ${commandName}`, err);
                     });
+                }
+                catch (err) {
+                    // one broken onChat must not stop the other commands
+                    log.err("onChat", `An error occurred before calling onChat of ${commandName}`, err);
+                }
             }
         }
 
@@ -663,7 +672,7 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
                 const { commandName, threadIDsChattedFirstTime } = itemOnFirstChat;
                 if (threadIDsChattedFirstTime.includes(threadID))
                     continue;
-                const command = GoatBot.commands.get(commandName);
+                const command = GoatBot.commands.get(String(commandName).toLowerCase());
                 if (!command)
                     continue;
 
@@ -718,7 +727,7 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
                 message.reply(utils.getText({ lang: langCode, head: "handlerEvents" }, "cannotFindCommandName"));
                 return log.err("onReply", `Can't find command name to execute this reply!`, Reply);
             }
-            const command = GoatBot.commands.get(commandName);
+            const command = GoatBot.commands.get(String(commandName).toLowerCase());
             if (!command) {
                 message.reply(utils.getText({ lang: langCode, head: "handlerEvents" }, "cannotFindCommand", commandName));
                 return log.err("onReply", `Command "${commandName}" not found`, Reply);
@@ -787,7 +796,7 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
                 message.reply(utils.getText({ lang: langCode, head: "handlerEvents" }, "cannotFindCommandName"));
                 return log.err("onReaction", `Can't find command name to execute this reaction!`, Reaction);
             }
-            const command = GoatBot.commands.get(commandName);
+            const command = GoatBot.commands.get(String(commandName).toLowerCase());
             if (!command) {
                 message.reply(utils.getText({ lang: langCode, head: "handlerEvents" }, "cannotFindCommand", commandName));
                 return log.err("onReaction", `Command "${commandName}" not found`, Reaction);
@@ -871,7 +880,7 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
             for (const key of allOnEvent) {
                 if (typeof key !== "string")
                     continue;
-                const command = GoatBot.commands.get(key);
+                const command = GoatBot.commands.get(key.toLowerCase());
                 if (!command)
                     continue;
                 const commandName = command.config.name;
