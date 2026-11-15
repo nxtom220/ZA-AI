@@ -253,7 +253,7 @@ async function viaNeokex(link) {
 	if (!data || data.status === false || !data.result)
 		throw new Error((data && data.message) || "API returned no result");
 	const result = data.result;
-	let media = (result.media || []).filter(m => m && m.url);
+	let media = (result.media || []).filter(m => m && m.url).map(m => ({ ...m, url: absUrl(m.url, API) }));
 	if (!media.length) {
 		const single = result.video || result.url || result.download || result.play;
 		if (typeof single === "string")
@@ -264,14 +264,27 @@ async function viaNeokex(link) {
 	return { title: result.title || "", media };
 }
 
+function sleep(ms) {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function viaTikwm(link) {
 	const base = "https://www.tikwm.com";
-	const { data } = await axios.get(`${base}/api/`, {
-		params: { url: link, hd: 1 },
-		timeout: 15000,
-		httpAgent, httpsAgent,
-		headers: { "user-agent": USER_AGENT }
-	});
+	let data;
+	for (let attempt = 0; attempt < 2; attempt++) {
+		({ data } = await axios.get(`${base}/api/`, {
+			params: { url: link, hd: 1 },
+			timeout: 15000,
+			httpAgent, httpsAgent,
+			headers: { "user-agent": USER_AGENT }
+		}));
+		// the free tikwm api allows 1 request per second, wait a little and try once more
+		if (data && data.code !== 0 && /limit/i.test(String(data.msg || "")) && attempt === 0) {
+			await sleep(1300);
+			continue;
+		}
+		break;
+	}
 	if (!data || data.code !== 0 || !data.data)
 		throw new Error((data && data.msg) || "API returned no result");
 	const d = data.data;
@@ -288,8 +301,8 @@ async function viaTikwm(link) {
 	return { title: d.title || "", media: valid };
 }
 
-// tries several sources AT THE SAME TIME, the first one that works wins (faster than one after another)
-async function fetchMedia(link) {
+// starts all sources at the same time. Every promise resolves to the result or null (the error is saved in "errors")
+function startProviders(link, errors) {
 	const isTiktok = /(^|\.)tiktok\.com$/.test(hostOf(link));
 	const providers = isTiktok
 		? [
@@ -305,37 +318,39 @@ async function fetchMedia(link) {
 				return viaNeokex(resolved);
 			}]
 		];
-	const errors = [];
-	const runs = providers.map(([name, run]) => run().catch(err => {
+	return providers.map(([name, run]) => run().then(info => ({ name, info })).catch(err => {
 		const msg = (err && err.response && err.response.status ? `HTTP ${err.response.status}` : (err && err.message)) || "unknown error";
 		errors.push(`${name}: ${msg}`);
-		throw err;
+		return null;
 	}));
-	try {
-		return await Promise.any(runs);
-	}
-	catch (e) {
-		throw new Error(errors.join(" | ") || "all sources failed");
+}
+
+// gives the results in the order they finish (the fastest source first), failed ones are skipped
+async function* inCompletionOrder(promises) {
+	const pending = new Map(promises.map((p, i) => [i, p.then(v => ({ i, v }))]));
+	while (pending.size) {
+		const { i, v } = await Promise.race(pending.values());
+		pending.delete(i);
+		if (v)
+			yield v;
 	}
 }
 
-function pickMedia(media) {
-	const videos = media.filter(m => m.type === "video");
-	if (videos.length) {
-		for (const q of ["hd", "sd"]) {
-			const found = videos.find(m => m.quality === q);
-			if (found)
-				return { kind: "video", item: found };
-		}
-		return { kind: "video", item: videos[0] };
-	}
+// all downloadable versions of one result, best first: hd, sd, others. If the best one fails the next one is tried
+function rankMedia(media) {
+	const score = m => (String(m.quality).toLowerCase() === "hd" ? 0 : String(m.quality).toLowerCase() === "sd" ? 1 : 2);
+	const videos = media.filter(m => m.type === "video").sort((x, y) => score(x) - score(y));
 	const images = media.filter(m => m.type === "image" || m.type === "photo");
-	if (images.length)
-		return { kind: "image", item: images[0] };
 	const audios = media.filter(m => m.type === "audio");
-	if (audios.length)
-		return { kind: "audio", item: audios[0] };
-	return { kind: "video", item: media[0] };
+	let list = [
+		...videos.map(item => ({ kind: "video", item })),
+		...images.map(item => ({ kind: "image", item })),
+		...audios.map(item => ({ kind: "audio", item }))
+	];
+	if (!list.length)
+		list = media.map(item => ({ kind: "video", item }));
+	const seen = new Set();
+	return list.filter(x => x.item && x.item.url && !seen.has(x.item.url) && seen.add(x.item.url)).slice(0, 3);
 }
 
 // asks the server for the first byte only, to learn the total size and if parallel download works
@@ -376,26 +391,29 @@ async function downloadPart(url, filePath, start, end) {
 	});
 }
 
-// big files are downloaded in several parts at once (much faster), small / unsupported ones in one stream
+// files of 10MB and more are downloaded in several parts at once (more parts for bigger files), small / unsupported ones in one stream
 async function downloadToFile(url, filePath) {
 	const total = await probeRange(url);
 	if (total > MAX_SIZE)
 		throw new Error("too large");
-	if (total >= 6 * 1024 * 1024) {
+	if (total >= 10 * 1024 * 1024) {
+		let ok = false;
 		try {
-			const parts = Math.min(8, Math.ceil(total / (3 * 1024 * 1024)));
+			// small files: few parts, up to 85MB: 6 parts, 86MB and more: 10 parts (every part is at least ~4MB)
+			const wanted = total <= 85 * 1024 * 1024 ? 6 : 10;
+			const parts = Math.max(2, Math.min(wanted, Math.ceil(total / (4 * 1024 * 1024))));
 			const size = Math.ceil(total / parts);
 			fs.writeFileSync(filePath, Buffer.alloc(0));
 			fs.truncateSync(filePath, total);
-			await Promise.all(Array.from({ length: parts }, (_, i) =>
+			// wait for EVERY part to stop before deciding, so no part writes into a file we already deleted
+			const results = await Promise.allSettled(Array.from({ length: parts }, (_, i) =>
 				downloadPart(url, filePath, i * size, Math.min(total - 1, (i + 1) * size - 1))));
-			if (fs.statSync(filePath).size !== total)
-				throw new Error("size mismatch");
+			ok = results.every(r => r.status === "fulfilled") && fs.statSync(filePath).size === total;
+		}
+		catch (e) { }
+		if (ok)
 			return filePath;
-		}
-		catch (e) {
-			removeFile(filePath);
-		}
+		removeFile(filePath);
 	}
 	return downloadSingle(url, filePath);
 }
@@ -434,6 +452,13 @@ async function downloadSingle(url, filePath) {
 	if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0)
 		throw new Error("Download produced no file");
 	return filePath;
+}
+
+// read stream that can never crash the bot (an unread stream of a deleted file would throw ENOENT)
+function openStream(filePath) {
+	const stream = fs.createReadStream(filePath);
+	stream.on("error", () => { });
+	return stream;
 }
 
 function removeFile(filePath) {
@@ -556,28 +581,56 @@ module.exports = {
 				return;
 			inProgress.add(lockKey);
 
-			let filePath;
 			try {
 				const startedAt = Date.now();
 				react(api, messageID, "⏳");
-				const info = await fetchMedia(link);
-				const { kind, item } = pickMedia(info.media);
-				const ext = item.extension || (kind === "audio" ? "mp3" : kind === "image" ? "jpg" : "mp4");
+				const errors = [];
+				let sent = false;
+				let attempts = 0;
+				let onlyTooLarge = true;
 				fs.ensureDirSync(TMP_DIR);
-				filePath = path.join(TMP_DIR, `autodl_${Date.now()}_${safeName(info.title)}.${ext}`);
-				await downloadToFile(item.url, filePath);
-				const caption = buildCaption({
-					title: info.title,
-					link,
-					kind,
-					item,
-					size: fs.statSync(filePath).size,
-					seconds: ((Date.now() - startedAt) / 1000).toFixed(2)
-				});
-				await message.reply({
-					body: caption,
-					attachment: fs.createReadStream(filePath)
-				});
+
+				// sources are tried in the order they answer, and every source can offer several qualities.
+				// If one download or upload fails, the next one is tried automatically.
+				outer:
+				for await (const src of inCompletionOrder(startProviders(link, errors))) {
+					for (const { kind, item } of rankMedia(src.info.media)) {
+						if (++attempts > 5)
+							break outer;
+						const ext = String(item.extension || (kind === "audio" ? "mp3" : kind === "image" ? "jpg" : "mp4")).replace(/[^a-z0-9]/gi, "") || "mp4";
+						// plain ASCII file name: emoji / special letters in the title can break the Messenger upload
+						const filePath = path.join(TMP_DIR, `autodl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
+						try {
+							await downloadToFile(item.url, filePath);
+							const size = fs.statSync(filePath).size;
+							const caption = buildCaption({
+								title: src.info.title, link, kind, item, size,
+								seconds: ((Date.now() - startedAt) / 1000).toFixed(2)
+							});
+							try {
+								await message.reply({ body: caption, attachment: openStream(filePath) });
+							}
+							catch (e1) {
+								// the caption text can be the problem, try again with a plain one
+								await message.reply({ body: "✅ Download complete", attachment: openStream(filePath) });
+							}
+							sent = true;
+						}
+						catch (e) {
+							const msg = (e && e.response && e.response.status ? `HTTP ${e.response.status}` : (e && e.message)) || "unknown error";
+							if (msg !== "too large")
+								onlyTooLarge = false;
+							errors.push(`${src.name}/${item.quality || kind}: ${msg}`);
+						}
+						finally {
+							removeFile(filePath);
+						}
+						if (sent)
+							break outer;
+					}
+				}
+				if (!sent)
+					throw new Error(attempts && onlyTooLarge ? "too large" : (errors.join(" | ") || "no source worked"));
 				react(api, messageID, "✅");
 			}
 			catch (err) {
@@ -595,7 +648,6 @@ module.exports = {
 			}
 			finally {
 				inProgress.delete(lockKey);
-				removeFile(filePath);
 			}
 		}
 		catch (err) {
