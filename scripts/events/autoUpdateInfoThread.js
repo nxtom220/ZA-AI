@@ -19,7 +19,7 @@ module.exports = {
 				return async function () {
 					const { addedParticipants } = event.logMessageData;
 					const threadInfo_Fca = await api.getThreadInfo(threadID);
-					threadsData.refreshInfo(threadID, threadInfo_Fca);
+					threadsData.refreshInfo(threadID, threadInfo_Fca).catch(() => { });
 
 					for (const user of addedParticipants) {
 						let oldData = members.find(member => member.userID === user.userFbId);
