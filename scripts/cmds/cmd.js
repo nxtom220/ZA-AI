@@ -374,7 +374,7 @@ function loadScripts(folder, fileName, log, configCommands, api, threadModel, us
 			allOnChat.splice(indexOnChat, 1);
 
 		// Check onFirstChat function
-		const indexOnFirstChat = allOnChat.findIndex(item => item == oldCommandName);
+		const indexOnFirstChat = allOnFirstChat.findIndex(item => item.commandName == oldCommandName);
 		let oldOnFirstChat;
 		if (indexOnFirstChat != -1) {
 			oldOnFirstChat = allOnFirstChat[indexOnFirstChat];
@@ -429,8 +429,8 @@ function loadScripts(folder, fileName, log, configCommands, api, threadModel, us
 				configCommands[typeEnvCommand][scriptName] = {};
 			configCommands[typeEnvCommand][scriptName] = envConfig;
 		}
-		GoatBot[setMap].delete(oldCommandName);
-		GoatBot[setMap].set(scriptName, command);
+		GoatBot[setMap].delete(String(oldCommandName).toLowerCase());
+		GoatBot[setMap].set(scriptName.toLowerCase(), command);
 		fs.writeFileSync(client.dirConfigCommands, JSON.stringify(configCommands, null, 2));
 		const keyUnloadCommand = folder == "cmds" ? "commandUnload" : "commandEventUnload";
 		const findIndex = (configCommands[keyUnloadCommand] || []).indexOf(`${fileName}.js`);
@@ -514,7 +514,7 @@ function unloadScripts(folder, fileName, configCommands, getLang) {
 	}
 	const setMap = folder == "cmds" ? "commands" : "eventCommands";
 	delete require.cache[require.resolve(pathCommand)];
-	GoatBot[setMap].delete(commandName);
+	GoatBot[setMap].delete(commandName.toLowerCase());
 	log.master("UNLOADED", getLang("unloaded", commandName));
 	const commandUnload = configCommands[folder == "cmds" ? "commandUnload" : "commandEventUnload"] || [];
 	if (!commandUnload.includes(`${fileName}.js`))
