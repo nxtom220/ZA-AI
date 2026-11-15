@@ -1,11 +1,17 @@
 const fs = require("fs-extra");
 const path = require("path");
 const axios = require("axios");
+const http = require("http");
+const https = require("https");
+
+// reuse connections = faster requests
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 32 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 32 });
 
 // Same downloader API that ytb.js already uses
 const API = "https://dl.neokex.xyz";
 const TMP_DIR = path.join(process.cwd(), "scripts", "cmds", "tmp");
-const MAX_SIZE = 83 * 1024 * 1024; // Messenger upload limit used by ytb.js
+const MAX_SIZE = 500 * 1024 * 1024; // max video size (500MB)
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Mobile Safari/537.36";
 
 // Any link that looks like one of these will be downloaded automatically
@@ -240,7 +246,8 @@ async function resolveUrl(link) {
 async function viaNeokex(link) {
 	const { data } = await axios.get(`${API}/dl`, {
 		params: { url: link },
-		timeout: 90000,
+		timeout: 40000,
+		httpAgent, httpsAgent,
 		headers: { "user-agent": USER_AGENT }
 	});
 	if (!data || data.status === false || !data.result)
@@ -261,7 +268,8 @@ async function viaTikwm(link) {
 	const base = "https://www.tikwm.com";
 	const { data } = await axios.get(`${base}/api/`, {
 		params: { url: link, hd: 1 },
-		timeout: 45000,
+		timeout: 15000,
+		httpAgent, httpsAgent,
 		headers: { "user-agent": USER_AGENT }
 	});
 	if (!data || data.code !== 0 || !data.data)
@@ -280,7 +288,7 @@ async function viaTikwm(link) {
 	return { title: d.title || "", media: valid };
 }
 
-// tries several sources one after another, so one broken API does not stop the download
+// tries several sources AT THE SAME TIME, the first one that works wins (faster than one after another)
 async function fetchMedia(link) {
 	const isTiktok = /(^|\.)tiktok\.com$/.test(hostOf(link));
 	const providers = isTiktok
@@ -298,16 +306,17 @@ async function fetchMedia(link) {
 			}]
 		];
 	const errors = [];
-	for (const [name, run] of providers) {
-		try {
-			return await run();
-		}
-		catch (err) {
-			const msg = (err && err.response && err.response.status ? `HTTP ${err.response.status}` : (err && err.message)) || "unknown error";
-			errors.push(`${name}: ${msg}`);
-		}
+	const runs = providers.map(([name, run]) => run().catch(err => {
+		const msg = (err && err.response && err.response.status ? `HTTP ${err.response.status}` : (err && err.message)) || "unknown error";
+		errors.push(`${name}: ${msg}`);
+		throw err;
+	}));
+	try {
+		return await Promise.any(runs);
 	}
-	throw new Error(errors.join(" | "));
+	catch (e) {
+		throw new Error(errors.join(" | ") || "all sources failed");
+	}
 }
 
 function pickMedia(media) {
@@ -329,13 +338,76 @@ function pickMedia(media) {
 	return { kind: "video", item: media[0] };
 }
 
+// asks the server for the first byte only, to learn the total size and if parallel download works
+async function probeRange(url) {
+	try {
+		const r = await axios.get(url, {
+			headers: { "user-agent": USER_AGENT, Range: "bytes=0-0" },
+			responseType: "stream", timeout: 10000, maxRedirects: 5,
+			httpAgent, httpsAgent, validateStatus: () => true
+		});
+		r.data.destroy();
+		if (r.status === 206) {
+			const m = /\/(\d+)\s*$/.exec(String(r.headers["content-range"] || ""));
+			if (m)
+				return Number(m[1]);
+		}
+	}
+	catch (e) { }
+	return 0;
+}
+
+async function downloadPart(url, filePath, start, end) {
+	const r = await axios({
+		url, method: "GET", responseType: "stream", timeout: 60000, maxRedirects: 5,
+		headers: { "user-agent": USER_AGENT, Range: `bytes=${start}-${end}` },
+		httpAgent, httpsAgent
+	});
+	if (r.status !== 206) {
+		r.data.destroy();
+		throw new Error("range not supported");
+	}
+	await new Promise((resolve, reject) => {
+		const w = fs.createWriteStream(filePath, { flags: "r+", start });
+		r.data.on("error", reject);
+		w.on("error", reject);
+		w.on("finish", resolve);
+		r.data.pipe(w);
+	});
+}
+
+// big files are downloaded in several parts at once (much faster), small / unsupported ones in one stream
 async function downloadToFile(url, filePath) {
+	const total = await probeRange(url);
+	if (total > MAX_SIZE)
+		throw new Error("too large");
+	if (total >= 6 * 1024 * 1024) {
+		try {
+			const parts = Math.min(8, Math.ceil(total / (3 * 1024 * 1024)));
+			const size = Math.ceil(total / parts);
+			fs.writeFileSync(filePath, Buffer.alloc(0));
+			fs.truncateSync(filePath, total);
+			await Promise.all(Array.from({ length: parts }, (_, i) =>
+				downloadPart(url, filePath, i * size, Math.min(total - 1, (i + 1) * size - 1))));
+			if (fs.statSync(filePath).size !== total)
+				throw new Error("size mismatch");
+			return filePath;
+		}
+		catch (e) {
+			removeFile(filePath);
+		}
+	}
+	return downloadSingle(url, filePath);
+}
+
+async function downloadSingle(url, filePath) {
 	const response = await axios({
 		url,
 		method: "GET",
 		responseType: "stream",
-		timeout: 120000,
+		timeout: 600000,
 		maxRedirects: 5,
+		httpAgent, httpsAgent,
 		headers: { "user-agent": USER_AGENT }
 	});
 	const declared = Number(response.headers["content-length"]) || 0;
@@ -460,14 +532,10 @@ module.exports = {
 						console.log("[AUTODL] no link in event:", JSON.stringify(event, (k, v) => (typeof v === "string" && v.length > 140 ? v.slice(0, 140) + "…" : v)).slice(0, 3500));
 					}
 					catch (e) { }
-					// the card only has a preview picture (tiktokcdn / cdninstagram), the real link is not sent to the bot.
-					// Tell the user instead of staying silent (once per message).
-					const dump = collectStrings(cards, [], 0).join(" ").toLowerCase();
-					const platform = /tiktok/.test(dump) ? "TikTok" : /cdninstagram|instagram/.test(dump) ? "Instagram" : "";
-					if (platform && messageID && !handledMessages.has("hint:" + messageID)) {
-						handledMessages.add("hint:" + messageID);
-						await message.reply(`⚠️ ${platform} card এর ভিতরে link আসেনি, শুধু preview ছবি এসেছে।\nLink copy করে সরাসরি text হিসেবে পাঠাও।`);
-					}
+					// the card has no link: nothing to download, only show ❌ (no text message).
+					// only for video platforms, other link cards are ignored silently
+					if (/tiktok|instagram|youtu|ytimg/.test(collectStrings(cards, [], 0).join(" ").toLowerCase()))
+						react(api, messageID, "❌");
 				}
 				return;
 			}
@@ -521,9 +589,8 @@ module.exports = {
 				catch (e) {
 					console.log("[AUTODL] Download failed for", link, "|", reason);
 				}
-				if (reason === "too large")
-					await message.reply("❌ Video is bigger than 83MB, can't send it here.");
-				else
+				// too large (>500MB): only the ❌ reaction, no text
+				if (reason !== "too large")
 					await message.reply(`❌ Download failed\n${reason.slice(0, 300)}`);
 			}
 			finally {
