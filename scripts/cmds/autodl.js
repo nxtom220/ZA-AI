@@ -409,14 +409,14 @@ function buildCaption({ title, link, kind, item, size, seconds }) {
 	const fileType = kind === "audio" ? "🎵 AUDIO" : kind === "image" ? "🖼️ IMAGE" : "🎬 VIDEO";
 	const quality = String(item.quality || "HD").toUpperCase();
 	return [
-		"🎬 DOWNLOAD COMPLETE 🎬",
+		"✅ DOWNLOAD COMPLETE ✅",
 		"────────────────────",
-		`✏️ TITLE — ${t}`,
-		`👑 PLATFORM — ${platformName(link)}`,
-		`📁 FILE — ${fileType}`,
-		`⚡ QUALITY — ${quality}`,
-		`⛓️  SIZE — ${formatSize(size)}`,
-		`⏰ TIME — ${seconds}s`,
+		`💠 TITLE — ${t}`,
+		`💠 PLATFORM — ${platformName(link)}`,
+		`💠 FILE — ${fileType}`,
+		`💠 QUALITY — ${quality}`,
+		`💠 SIZE — ${formatSize(size)}`,
+		`💠 TIME — ${seconds}s`,
 		"────────────────────",
 		"⚙️ POWERED BY AKASH"
 	].join("\n");
