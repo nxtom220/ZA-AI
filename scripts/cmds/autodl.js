@@ -91,11 +91,17 @@ function linksFromString(str) {
 	return found.filter(isSupported);
 }
 
-// links from the text AND from shared-link attachments / replied message
-// so the link works with or without the word "autodl" in front of it
-function collectLinks(event) {
-	const found = [...extractLinks(event.body)];
-	const attachments = Array.isArray(event.attachments) ? event.attachments : [];
+// links from ONE message object: its body text first, then its attachments.
+// A shared card (attachment type "share") usually only carries a preview image url,
+// the real link is in the message body, so the body is always read first.
+function linksFromMessage(msg) {
+	const found = [];
+	if (!msg || typeof msg !== "object")
+		return found;
+	for (const l of linksFromString(String(msg.body || "")))
+		if (!found.includes(l))
+			found.push(l);
+	const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
 	for (const att of attachments) {
 		if (!att || typeof att !== "object")
 			continue;
@@ -107,8 +113,16 @@ function collectLinks(event) {
 				if (!found.includes(link))
 					found.push(link);
 	}
-	// non-facebook links first (a shared TikTok card can also contain a facebook.com redirect)
-	found.sort((a, b) => Number(/facebook\.com|fb\.com/.test(hostOf(a))) - Number(/facebook\.com|fb\.com/.test(hostOf(b))));
+	return found;
+}
+
+function collectLinks(event) {
+	let found = linksFromMessage(event);
+	// replying to a shared link with the word "autodl" downloads the replied message's link
+	if (!found.length && event.messageReply && /autodl|autodown/i.test(String(event.body || "")))
+		found = linksFromMessage(event.messageReply);
+	// non-facebook links first (a shared card can also contain a facebook.com redirect)
+	found.sort((x, y) => Number(/facebook\.com|fb\.com/.test(hostOf(x))) - Number(/facebook\.com|fb\.com/.test(hostOf(y))));
 	return found;
 }
 
@@ -340,9 +354,9 @@ function buildCaption({ title, link, kind, item, size, seconds }) {
 		`✏️ TITLE — ${t}`,
 		`👑 PLATFORM — ${platformName(link)}`,
 		`📁 FILE — ${fileType}`,
-		`🗿 QUALITY — ${quality}`,
-		`🏷️  SIZE — ${formatSize(size)}`,
-		`🕦 TIME — ${seconds}s`,
+		`⚡ QUALITY — ${quality}`,
+		`⛓️  SIZE — ${formatSize(size)}`,
+		`⏰ TIME — ${seconds}s`,
 		"────────────────────",
 		"⚙️ POWERED BY AKASH"
 	].join("\n");
@@ -377,12 +391,21 @@ module.exports = {
 				return;
 			const links = collectLinks(event);
 			if (!links.length) {
-				// help debugging: show what a shared card looks like when no link was found
-				if (Array.isArray(event.attachments) && event.attachments.some(a => a && ["share", "link", "video", "unknown"].includes(a.type))) {
+				const cards = (Array.isArray(event.attachments) ? event.attachments : []).filter(a => a && a.type === "share");
+				if (cards.length) {
+					// full event dump with long strings shortened, so the log stays readable
 					try {
-						console.log("[AUTODL] no supported link found. attachment dump:", JSON.stringify(event.attachments).slice(0, 1500));
+						console.log("[AUTODL] no link in event:", JSON.stringify(event, (k, v) => (typeof v === "string" && v.length > 140 ? v.slice(0, 140) + "…" : v)).slice(0, 3500));
 					}
 					catch (e) { }
+					// the card only has a preview picture (tiktokcdn / cdninstagram), the real link is not sent to the bot.
+					// Tell the user instead of staying silent (once per message).
+					const dump = collectStrings(cards, [], 0).join(" ").toLowerCase();
+					const platform = /tiktok/.test(dump) ? "TikTok" : /cdninstagram|instagram/.test(dump) ? "Instagram" : "";
+					if (platform && messageID && !handledMessages.has("hint:" + messageID)) {
+						handledMessages.add("hint:" + messageID);
+						await message.reply(`⚠️ ${platform} card এর ভিতরে link আসেনি, শুধু preview ছবি এসেছে।\nLink copy করে সরাসরি text হিসেবে পাঠাও।`);
+					}
 				}
 				return;
 			}
