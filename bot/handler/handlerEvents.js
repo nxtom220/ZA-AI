@@ -770,6 +770,26 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
         }
 
         async function onReaction() {
+            // Unsend system: a bot admin reacting with a delete emoji (config.reactBy.delete) makes the
+            // bot unsend that message. Only works on messages the bot itself sent.
+            if (config.unsendOnReaction?.enable === true && event.reaction && isAdmin(senderID) && senderID != api.getCurrentUserID()) {
+                const deleteEmojis = Array.isArray(config.reactBy?.delete) && config.reactBy.delete.length
+                    ? config.reactBy.delete
+                    : ["😠", "😡"];
+                if (deleteEmojis.includes(event.reaction)) {
+                    // Facebook refuses to unsend other people's messages, so just try; this also keeps
+                    // working for bot messages sent before the last restart.
+                    try {
+                        await api.unsendMessage(messageID);
+                        log.info("onReaction", `Unsent message ${messageID} (admin ${senderID} reacted ${event.reaction})`);
+                    }
+                    catch (err) {
+                        log.err("onReaction", `Can't unsend message ${messageID} (probably not sent by the bot)`, err && err.message || err);
+                    }
+                    return;
+                }
+            }
+
             // Mirror system: if a bot admin reacts to ANY message, the bot reacts the same way
             if (
                 config.reactionMirror?.enable !== false &&
