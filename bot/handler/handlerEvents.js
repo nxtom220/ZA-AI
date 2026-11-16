@@ -307,28 +307,21 @@ module.exports = function (api, threadModel, userModel, dashBoardModel, globalMo
             } else if (event.messageReply && event.messageReply.senderID) {
                 event.mentions = { [event.messageReply.senderID]: "" };
             } else {
-                // FALLBACK: Try to resolve the first tag like @Arisa by looking up group members
+                // FALLBACK: Try to resolve the first tag like @Arisa by looking up group members.
+                // Uses the cached thread data only. It used to call api.getThreadInfo() here, i.e. one
+                // request to Facebook for EVERY chat message containing "@", command or not, which
+                // floods the account with requests (worst right after a restart) and gets it logged out.
                 const tagMatch = body.match(/@([^ ]+)/);
                 if (tagMatch) {
                     const tagName = tagMatch[1].toLowerCase();
-                    const info = await api.getThreadInfo(threadID);
-                    const userInfo = info.userInfo || [];
-                    const nicknames = info.nicknames || {};
+                    const members = (threadData && Array.isArray(threadData.members)) ? threadData.members : [];
 
-                    // 1. Try nickname match
-                    let foundID = Object.keys(nicknames).find(id => nicknames[id].toLowerCase().includes(tagName));
-                    
-                    // 2. Try name/firstName match
-                    if (!foundID) {
-                        const user = userInfo.find(u => 
-                            (u.name && u.name.toLowerCase().includes(tagName)) || 
-                            (u.firstName && u.firstName.toLowerCase().includes(tagName))
-                        );
-                        if (user) foundID = user.id;
-                    }
+                    // 1. Try nickname match, 2. Try name match
+                    const found = members.find(m => m && m.inGroup !== false && m.nickname && String(m.nickname).toLowerCase().includes(tagName))
+                        || members.find(m => m && m.inGroup !== false && m.name && String(m.name).toLowerCase().includes(tagName));
 
-                    if (foundID) {
-                        event.mentions = { [foundID]: "" };
+                    if (found && found.userID) {
+                        event.mentions = { [found.userID]: "" };
                     }
                 }
             }
