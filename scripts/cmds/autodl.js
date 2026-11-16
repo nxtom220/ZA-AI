@@ -43,7 +43,8 @@ const ALLOW_REPLY_COMMAND = false;
 
 // true  = (old behaviour) also look inside shared cards / attachments / the whole event for a link.
 // false = STRICT: download ONLY when the message text itself contains a link. Nothing else is used.
-const ALLOW_CARD_LINKS = false;
+// (true = direct link / shared card works with no "autodl" word needed)
+const ALLOW_CARD_LINKS = true;
 
 // ---- bot status / warning texts are never a download request ----
 // Anyone (member or another bot) can send a link and it is downloaded. Only the status texts that
