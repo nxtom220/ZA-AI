@@ -6,7 +6,7 @@
     "i_user": "",
     "proxy": null,
     "userAgent": "Mozilla/5.0 (Linux; Android 12; M2102J20SG) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Mobile Safari/537.36",
-    "intervalGetNewCookie": 1440,
+    "intervalGetNewCookie": null,
     "notes": "time the system automatically retrieves new cookies from email/password, unit is minute, if you set null, the system will not automatically retrieve new cookies, it saves you from having to manually change your cookie every time it expires. recommended set to 1440 (1day) or 4320 (3day).TO BE ABLE TO USE THIS FEATURE YOU NEED TO ENTER THE ACCOUNT PASSWORD ABOVE"
   },
   "antiInbox": false,
@@ -19,6 +19,10 @@
   "typingIndicator": {
     "enable": true,
     "duration": 2000
+  },
+  "unsendOnReaction": {
+    "enable": true,
+    "notes": "when true, a bot admin (adminBot) reacting to a bot message with an emoji from reactBy.delete makes the bot unsend that message. Toggle with the 'uor' command."
   },
   "reactionMirror": {
     "enable": true
@@ -122,11 +126,18 @@
     "ignoreEvents": "",
     "notes": "this feature will automatically load the script when scripts have been changed, you can set ignoreCmds to ignore commands, ignoreEvents to ignore events, separate by comma or space, example: \"cmd1.js cmd2.js cmd3.js\" (without backslash)"
   },
+  "ignoreOldMessages": {
+    "enable": true,
+    "graceMs": 15000,
+    "keep": 3000,
+    "notes": "when the bot starts/reconnects, Messenger replays old messages. enable=true makes the bot ignore messages sent before it started (minus graceMs) and never run the same messageID twice, even across restarts."
+  },
   "autoRefreshFbstate": true,
+  "autoRefreshFbstateInterval": 30,
   "autoReloginWhenChangeAccount": false,
   "autoRestartWhenListenMqttError": false,
   "restartListenMqtt": {
-    "enable": true,
+    "enable": false,
     "timeRestart": 345600000,
     "delayAfterStopListening": 2000,
     "logNoti": true,
