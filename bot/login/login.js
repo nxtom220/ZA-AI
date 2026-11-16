@@ -28,6 +28,7 @@ async function getName(userID) {
 const { writeFileSync, readFileSync, existsSync, watch } = require("fs-extra");
 const handlerWhenListenHasError = require("./handlerWhenListenHasError.js");
 const checkLiveCookie = require("./checkLiveCookie.js");
+const eventGuard = require("./eventGuard.js");
 const { callbackListenTime, storage5Message } = global.GoatBot;
 const { log, logColor, getPrefix, createOraDots, jsonStringifyColor, getText, convertTime, colors, randomString } = global.utils;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -840,8 +841,6 @@ async function startBot(loginWithEmail) {
 							const keyListen = Object.keys(callbackListenTime).pop();
 							if (callbackListenTime[keyListen])
 								callbackListenTime[keyListen] = () => { };
-							const cookieString = appState.map(i => i.key + "=" + i.value).join("; ");
-
 							let times = 5;
 
 							const spin = createOraDots(getText('login', 'retryCheckLiveCookie', times));
@@ -854,17 +853,33 @@ async function startBot(loginWithEmail) {
 
 							if (intervalCheckLiveCookieAndRelogin == false) {
 								intervalCheckLiveCookieAndRelogin = true;
-								const interval = setInterval(async () => {
+								// Back off (30s -> 5min) instead of hitting Facebook every 5s; a tight
+								// loop of cookie checks is itself a good way to get the session killed.
+								let delay = 30000;
+								const checkAgain = async () => {
+									// use the cookies the client holds NOW (it rotates them in place),
+									// not the ones captured at startup which may already be stale
+									let cookieString;
+									try {
+										cookieString = filterKeysAppState(api.getAppState()).map(i => i.key + "=" + i.value).join("; ");
+									}
+									catch (e) {
+										cookieString = appState.map(i => i.key + "=" + i.value).join("; ");
+									}
 									const cookieIsLive = await checkLiveCookie(cookieString, facebookAccount.userAgent);
 									if (cookieIsLive !== false) {
-										clearInterval(interval);
 										clearInterval(countTimes);
+										spin._stop?.();
 										intervalCheckLiveCookieAndRelogin = false;
 										const keyListen = Date.now();
 										isSendNotiErrorMessage = false;
 										global.GoatBot.Listening = api.listenMqtt(createCallBackListen(keyListen));
+										return;
 									}
-								}, 5000);
+									delay = Math.min(delay * 2, 300000);
+									setTimeout(checkAgain, delay);
+								};
+								setTimeout(checkAgain, delay);
 							}
 						}
 						return;
@@ -919,6 +934,11 @@ async function startBot(loginWithEmail) {
 					if (storage5Message.length > 5)
 						storage5Message.shift();
 				}
+
+				// Messenger replays old/already-handled messages after a restart or reconnect.
+				// Drop them here so commands are not executed a second time.
+				if (eventGuard.shouldSkip(event))
+					return;
 
 				if (configLog.disableAll === false && configLog[event.type] !== false) {
 					const participantIDs_ = [...event.participantIDs || []];
