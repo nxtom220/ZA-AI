@@ -37,6 +37,30 @@ const SUPPORTED = [
 	"douyin.com", "kwai.com", "kuaishou.com", "sharechat.com", "rumble.com"
 ];
 
+// false = never download from a quoted/replied message. Set to true only if you want the old
+// "reply to a link with the word autodl" trick back.
+const ALLOW_REPLY_COMMAND = false;
+
+// true  = (old behaviour) also look inside shared cards / attachments / the whole event for a link.
+// false = STRICT: download ONLY when the message text itself contains a link. Nothing else is used.
+const ALLOW_CARD_LINKS = false;
+
+// ---- bot status / warning texts are never a download request ----
+// Anyone (member or another bot) can send a link and it is downloaded. Only the status texts that
+// bots print themselves (captions, the "TikTok card ... link আসেনি" warning, errors) are skipped.
+// The SENDER is never blocked: the same person/bot sending a plain link later still downloads.
+const BOT_SIGNS = [
+	/DOWNLOAD COMPLETE/i,
+	/POWERED BY/i,
+	/download failed/i,
+	/(TITLE|PLATFORM|QUALITY|SIZE|TIME)\s*[—–:-]\s*\S/,
+	/card এর ভিতরে|preview ছবি|link আসেনি|Link copy করে/i
+];
+
+function isBotStatusText(event) {
+	return BOT_SIGNS.some(re => re.test(String(event.body || "")));
+}
+
 const URL_REGEX = /https?:\/\/[^\s<>"'\]\[]+/gi;
 const inProgress = new Set();
 const handledMessages = new Set();
@@ -74,6 +98,10 @@ function extractLinks(text) {
 // Messenger puts the shared link in different fields depending on the app / platform
 // (url, facebookUrl, target.url, story_attachment.url, source, description ...),
 // so we do not guess the field name, we scan all of them.
+// IMPORTANT: the message that was replied to / quoted is NOT part of this message. Its link belongs to
+// someone else's message (e.g. another bot's reply quoting a link), so those keys are never read.
+const QUOTED_KEYS = /^(messageReply|replyToMessage|reply_to_message|repliedToMessage|replied_to_message|quotedMessage|quoted_message|replyMessage|reply_message|forwardedFrom)$/i;
+
 function collectStrings(value, out, depth) {
 	if (depth > 6 || value == null)
 		return out;
@@ -83,8 +111,11 @@ function collectStrings(value, out, depth) {
 		for (const v of value)
 			collectStrings(v, out, depth + 1);
 	else if (typeof value === "object")
-		for (const k of Object.keys(value))
+		for (const k of Object.keys(value)) {
+			if (QUOTED_KEYS.test(k))
+				continue;
 			collectStrings(value[k], out, depth + 1);
+		}
 	return out;
 }
 
@@ -124,6 +155,11 @@ function linksFromMessage(msg) {
 }
 
 function collectLinks(event) {
+	if (!ALLOW_CARD_LINKS) {
+		// strict mode: only the text the person typed/pasted in THIS message
+		const own = linksFromString(String((event && event.body) || ""));
+		return [...new Set(own)];
+	}
 	let found = linksFromMessage(event);
 	// the link may sit in a field we do not know about: scan the whole event object
 	if (!found.length) {
@@ -137,8 +173,9 @@ function collectLinks(event) {
 		}
 		catch (e) { }
 	}
-	// replying to a shared link with the word "autodl" downloads the replied message's link
-	if (!found.length && event.messageReply && /autodl|autodown/i.test(String(event.body || "")))
+	// Only links that are inside THIS message are downloaded. Links from a replied-to / quoted message
+	// (for example another bot answering a link) are never used.
+	if (ALLOW_REPLY_COMMAND && !found.length && event.messageReply && /autodl|autodown/i.test(String(event.body || "")))
 		found = linksFromMessage(event.messageReply);
 	// non-facebook links first (a shared card can also contain a facebook.com redirect)
 	found.sort((x, y) => Number(/facebook\.com|fb\.com/.test(hostOf(x))) - Number(/facebook\.com|fb\.com/.test(hostOf(y))));
@@ -175,8 +212,9 @@ async function linksViaLookup(api, event) {
 		if (!data)
 			continue;
 		const list = Array.isArray(data) ? data : [data];
+		// only the very same message, never a neighbouring message of the history
 		const same = list.filter(m => m && String(m.messageID) === String(messageID));
-		for (const m of (same.length ? same : list.slice(-3))) {
+		for (const m of same) {
 			const got = [];
 			try {
 				for (const str of collectStrings(m, [], 0))
@@ -185,7 +223,7 @@ async function linksViaLookup(api, event) {
 							got.push(l);
 			}
 			catch (e) { }
-			if (got.length && (same.length || String(m.senderID) === String(event.senderID)))
+			if (got.length)
 				return got;
 		}
 	}
@@ -546,10 +584,19 @@ module.exports = {
 			// never react to the bot's own messages (prevents loops)
 			if (String(senderID) === String(api.getCurrentUserID()))
 				return;
+			// bot status/warning texts are not download requests
+			if (isBotStatusText(event))
+				return;
+			const ignoreIDs = ((global.GoatBot.config.autodl || {}).ignoreUserIDs || []).map(String);
+			if (ignoreIDs.includes(String(senderID)))
+				return;
 			let links = collectLinks(event);
-			if (!links.length && Array.isArray(event.attachments) && event.attachments.some(a => a && a.type === "share"))
+			if (ALLOW_CARD_LINKS && !links.length && Array.isArray(event.attachments) && event.attachments.some(a => a && a.type === "share"))
 				links = await linksViaLookup(api, event);
 			if (!links.length) {
+				// strict mode: no link in the text = do nothing at all (no download, no reaction, no message)
+				if (!ALLOW_CARD_LINKS)
+					return;
 				const cards = (Array.isArray(event.attachments) ? event.attachments : []).filter(a => a && a.type === "share");
 				if (cards.length) {
 					// full event dump with long strings shortened, so the log stays readable
